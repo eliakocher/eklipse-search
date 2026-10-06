@@ -33,7 +33,19 @@ The zip ends up in `com.eklipse.search.site/target/`.
    *Install anyway* (the wording differs a bit between Eclipse versions).
 6. Restart Eclipse when asked.
 
-Then open the view with `Ctrl+Alt+Shift+F` (Windows, Linux) or `Cmd+Alt+Shift+F` (macOS), see [Usage](#usage).
+### 3. Open it, or pick your own shortcut
+
+Open the view with `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS) or *Search > Eklipse Search...*.
+
+If the shortcut doesn't work, or you want a different one:
+
+1. *Window > Preferences* (macOS: *Eclipse > Settings...*) *> General > Keys*.
+2. Type `Eklipse Search` in the filter field and select the command.
+3. Click into *Binding* and press the keys you want. Leave *When* on *In Windows*.
+4. Check the *Conflicts* list below: if another command uses the same keys, remove its binding or pick other keys.
+5. *Apply and Close*.
+
+See [Usage](#usage) for everything else.
 
 **Update:** install a newer zip the same way, Eclipse shows it as an update.
 
@@ -125,8 +137,7 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 The view opens on the right, stacked with the Outline, in a fresh perspective (or after *Window > Perspective > Reset
 Perspective*). Otherwise drag its tab to the side you like once, Eclipse remembers the position.
 
-To use another shortcut: *Window > Preferences* (*Settings* on macOS) *> General > Keys*, filter for `Eklipse Search`
-(the command's name), change the binding and check the *Conflicts* list.
+To use another shortcut, see [Open it, or pick your own shortcut](#3-open-it-or-pick-your-own-shortcut).
 
 ### Include / exclude globs
 
