@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension
+         point="org.eclipse.ui.views">
+      <view
+            id="com.eklipse.search.view"
+            name="Search"
+            category="org.eclipse.ui"
+            class="com.eklipse.search.ui.SearchView"
+            icon="icons/search.png"
+            restorable="true">
+      </view>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.commands">
+      <command
+            id="com.eklipse.search.open"
+            name="Eklipse Search"
+            description="Search and replace text across the workspace, VS Code style"
+            categoryId="org.eclipse.search.ui.category.search"
+            defaultHandler="com.eklipse.search.ui.OpenSearchViewHandler">
+      </command>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.bindings">
+      <!-- M1+M2+M3+F = Cmd+Alt+Shift+F on macOS, Ctrl+Alt+Shift+F elsewhere; unused by the Eclipse IDE packages. -->
+      <key
+            commandId="com.eklipse.search.open"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            contextId="org.eclipse.ui.contexts.window"
+            sequence="M1+M2+M3+F">
+      </key>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.menus">
+      <menuContribution
+            locationURI="menu:org.eclipse.search.menu?after=dialogGroup">
+         <command
+               commandId="com.eklipse.search.open"
+               icon="icons/search.png"
+               label="Eklipse Search..."
+               style="push">
+         </command>
+      </menuContribution>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.perspectiveExtensions">
+      <perspectiveExtension
+            targetID="*">
+         <view
+               id="com.eklipse.search.view"
+               relative="org.eclipse.ui.views.ContentOutline"
+               relationship="stack"
+               visible="false">
+         </view>
+      </perspectiveExtension>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.themes">
+      <colorDefinition
+            id="com.eklipse.search.replace.removed"
+            label="Eklipse Search: replaced text background"
+            categoryId="org.eclipse.ui.workbenchMisc"
+            value="255,205,205">
+      </colorDefinition>
+      <colorDefinition
+            id="com.eklipse.search.replace.added"
+            label="Eklipse Search: replacement text background"
+            categoryId="org.eclipse.ui.workbenchMisc"
+            value="196,236,196">
+      </colorDefinition>
+   </extension>
+
+   <extension
+         point="org.eclipse.e4.ui.css.swt.theme">
+      <stylesheet
+            uri="css/dark.css">
+         <themeid
+               refid="org.eclipse.e4.ui.css.theme.e4_dark">
+         </themeid>
+      </stylesheet>
+   </extension>
+</plugin>

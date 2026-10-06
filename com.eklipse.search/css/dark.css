@@ -1,0 +1,6 @@
+/* Dark theme values for the colors defined in plugin.xml (org.eclipse.ui.themes). */
+IEclipsePreferences#org-eclipse-ui-workbench:com-eklipse-search { /* pseudo attribute so this contribution doesn't replace other nodes */
+	preferences:
+		'com.eklipse.search.replace.removed=110,40,40'
+		'com.eklipse.search.replace.added=36,84,40'
+}

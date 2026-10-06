@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+      id="com.eklipse.search.feature"
+      label="Eklipse Search"
+      version="1.0.0.qualifier"
+      provider-name="Eklipse">
+
+   <description>
+      VS Code style search and replace across the workspace: search as you type, case / whole word / regex
+      toggles, include and exclude globs, results grouped by file, replace with preview and undo.
+   </description>
+
+   <plugin
+         id="com.eklipse.search"
+         version="0.0.0"/>
+
+</feature>
