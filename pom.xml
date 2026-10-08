@@ -6,7 +6,7 @@
 
 	<groupId>com.eklipse</groupId>
 	<artifactId>search-parent</artifactId>
-	<version>1.0.0-SNAPSHOT</version>
+	<version>1.0.1-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
 	<name>Eklipse Search</name>
@@ -14,7 +14,9 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<tycho.version>5.0.4</tycho.version>
-		<!-- Oldest Eclipse release we compile against. Newer releases stay compatible because only public API is used. -->
+		<!-- Oldest Eclipse release we compile against. Newer releases stay compatible because only public API is used,
+			except for JDT's semantic highlighting rules in the preview (JavaSemanticColors), which fall back to the
+			colors of the code scanners if JDT changes them. -->
 		<eclipse.release>2024-03</eclipse.release>
 		<!-- Java level used to resolve the target platform; newer releases need JavaSE-21 (-Dbuild.ee=JavaSE-21) -->
 		<build.ee>JavaSE-17</build.ee>

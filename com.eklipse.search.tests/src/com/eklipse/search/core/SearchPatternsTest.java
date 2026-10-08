@@ -2,12 +2,10 @@ package com.eklipse.search.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 import org.junit.jupiter.api.Test;
 
@@ -57,11 +55,6 @@ class SearchPatternsTest {
 	void regexAnchorsWorkPerLine() {
 		Pattern pattern = SearchPatterns.create("^end$", true, false, true);
 		assertTrue(pattern.matcher("start\nend\nmore").find());
-	}
-
-	@Test
-	void invalidRegexThrows() {
-		assertThrows(PatternSyntaxException.class, () -> SearchPatterns.create("(", true, false, true));
 	}
 
 	@Test

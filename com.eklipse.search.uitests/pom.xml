@@ -7,7 +7,7 @@
 	<parent>
 		<groupId>com.eklipse</groupId>
 		<artifactId>search-parent</artifactId>
-		<version>1.0.0-SNAPSHOT</version>
+		<version>1.0.1-SNAPSHOT</version>
 	</parent>
 
 	<!-- Opens a real workbench window: run with ./mvnw verify -Pui-tests -->
@@ -44,6 +44,22 @@
 							<requirement>
 								<type>eclipse-feature</type>
 								<id>org.eclipse.platform</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<!-- optional, color the preview -->
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.eclipse.jdt.ui</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.eclipse.tm4e.ui</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.eclipse.tm4e.language_pack</id>
 								<versionRange>0.0.0</versionRange>
 							</requirement>
 						</extraRequirements>

@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: Eklipse Search
 Bundle-SymbolicName: com.eklipse.search;singleton:=true
-Bundle-Version: 1.0.0.qualifier
+Bundle-Version: 1.0.1.qualifier
 Bundle-Vendor: Eklipse
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Automatic-Module-Name: com.eklipse.search
@@ -17,7 +17,13 @@ Require-Bundle: org.eclipse.core.runtime,
  org.eclipse.ui.ide,
  org.eclipse.ui.workbench.texteditor,
  org.eclipse.ui.editors,
- org.eclipse.ltk.core.refactoring
+ org.eclipse.ltk.core.refactoring,
+ org.eclipse.jdt.ui;resolution:=optional,
+ org.eclipse.jdt.core;resolution:=optional,
+ org.eclipse.jdt.core.manipulation;resolution:=optional,
+ org.eclipse.tm4e.core;resolution:=optional,
+ org.eclipse.tm4e.registry;resolution:=optional,
+ org.eclipse.tm4e.ui;resolution:=optional
 Import-Package: org.eclipse.search.core.text
 Export-Package: com.eklipse.search.core;x-internal:=true,
  com.eklipse.search.ui;x-internal:=true

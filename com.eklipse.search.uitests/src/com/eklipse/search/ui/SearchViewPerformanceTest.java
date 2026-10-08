@@ -3,15 +3,20 @@ package com.eklipse.search.ui;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IProjectDescription;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.jface.viewers.StructuredSelection;
+import org.eclipse.swt.custom.StyleRange;
+import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
@@ -91,16 +96,38 @@ class SearchViewPerformanceTest {
 		long stallMs = maxStallNanos / 1_000_000;
 		System.out.println("PERF typing '" + query + "': " + view.getSummary() + ", total " + totalMs
 				+ " ms, longest UI freeze " + stallMs + " ms");
+		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	@Test
+	void previewingABigJavaFileKeepsTheUiResponsive() throws CoreException {
+		// a bit below the size up to which the preview colors the syntax in the UI thread
+		StringBuilder code = new StringBuilder("package big;\n\n/** Generated. */\npublic class Big {\n");
+		for (int i = 0; code.length() < 950_000; i++) {
+			code.append(i == 10_000 ? "\tpublic void needle() {}\n" : "\tprivate static final String FIELD_" + i
+					+ " = \"value\" + " + i + "; // comment " + i + "\n");
+		}
+		code.append("}\n");
+		IFile big = project.getFile("src/Big.java");
+		big.create(new ByteArrayInputStream(code.toString().getBytes(StandardCharsets.UTF_8)), true, null);
+		view.setPreviewVisible(true);
+		view.activateSearch("needle");
+		waitUntil(() -> !view.isSearching(), 60_000);
+		StyledText preview = view.getPreview().getTextWidget();
 
 		startMeasuring();
-		view.getViewer().getControl().setFocus();
-		long collapseStart = System.nanoTime();
-		view.getViewer().collapseAll();
+		long start = System.nanoTime();
+		view.getViewer().setSelection(new StructuredSelection(view.getResult().get(big).getMatches().get(0)), true);
+		// the keyword 'package' is colored, then the field names by the semantic highlighting
+		waitUntil(() -> preview.getCharCount() > 0 && preview.getStyleRangeAtOffset(0) != null, 10_000);
+		int field = code.indexOf("FIELD_0");
+		StyleRange lexical = preview.getStyleRangeAtOffset(field);
+		waitUntil(() -> !lexical.similarTo(preview.getStyleRangeAtOffset(field)), 60_000);
 		drain(200);
 		measuring = false;
-		System.out.println("PERF collapse all: " + (System.nanoTime() - collapseStart) / 1_000_000
-				+ " ms, longest UI freeze " + maxStallNanos / 1_000_000 + " ms");
-
+		long stallMs = maxStallNanos / 1_000_000;
+		System.out.println("PERF preview of a " + code.length() / 1000 + " KB Java file: total "
+				+ (System.nanoTime() - start) / 1_000_000 + " ms, longest UI freeze " + stallMs + " ms");
 		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
 	}
 

@@ -12,7 +12,7 @@ Works with Eclipse 2024-03 or newer on macOS, Windows and Linux. Tested so far o
 
 ### 1. Get the update site
 
-You need the file `com.eklipse.search.site-1.0.0-SNAPSHOT.zip`. Either ask a colleague who has it, or build it
+You need the file `com.eklipse.search.site-1.0.1-SNAPSHOT.zip`. Either ask a colleague who has it, or build it
 yourself (needs a JDK 21, Maven is downloaded automatically):
 
 | | |
@@ -59,7 +59,7 @@ See [Usage](#usage) for everything else.
   ```sh
   # macOS
   /Applications/Eclipse.app/Contents/MacOS/eclipse -nosplash -application org.eclipse.equinox.p2.director \
-      -repository "jar:file:/path/to/com.eklipse.search.site-1.0.0-SNAPSHOT.zip!/" \
+      -repository "jar:file:/path/to/com.eklipse.search.site-1.0.1-SNAPSHOT.zip!/" \
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
 
   # Linux: same arguments, started with <eclipse folder>/eclipse
@@ -68,11 +68,11 @@ See [Usage](#usage) for everything else.
   ```bat
   :: Windows: eclipsec.exe prints the output to the console
   C:\path\to\eclipse\eclipsec.exe -nosplash -application org.eclipse.equinox.p2.director ^
-      -repository "jar:file:/C:/path/to/com.eklipse.search.site-1.0.0-SNAPSHOT.zip!/" ^
+      -repository "jar:file:/C:/path/to/com.eklipse.search.site-1.0.1-SNAPSHOT.zip!/" ^
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.0-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.1-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -88,8 +88,9 @@ See [Usage](#usage) for everything else.
 
 ## Features
 
-- Search as you type across all open projects, results stream in while the search runs. Like Quick Search, typing
-  more only searches the files that already had matches, and the previous results stay until the new ones arrive
+- Search as you type across all open projects, results stream in while the search runs, with a progress bar when it
+  takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
+  searches the files that already had matches, and the previous results stay until the new ones arrive
 - **Aa** match case, **ab** whole word, **.\*** regular expression
 - Replace field (toggle with the chevron) with **AB** preserve case and **Replace All**
   - matches are previewed as ~~old~~new in the results
@@ -97,12 +98,22 @@ See [Usage](#usage) for everything else.
   - replace one match, a file or a selection from the context menu
   - unsaved editors are updated in place and stay unsaved, everything can be undone (Edit > Undo while the view is active)
   - files changed since the search are skipped instead of being replaced at the wrong position
-- *files to include* (prefilled with `*.java`) / *files to exclude* (VS Code globs, see below) and *Skip derived
-  resources* (Maven `target/` folders are derived), always visible, include and exclude side by side. The view
-  remembers what you enter there, and the search options, across restarts
+- *files to include* (prefilled with `*.java`) / *files to exclude* (prefilled with `testbundle.*, **/node_modules`),
+  VS Code globs (see below), always visible, side by side, with the funnel toggle next to them to skip derived
+  resources (on by default, Maven `target/` folders are derived). The view remembers what you enter there, and the
+  search options, across restarts. The arrow next to each field (or `↓` in it) lists the last 15 values you used
+  there, a value counts once you leave the field or press `Enter`
 - Preview like Quick Search: a click on a result shows its file below the results, with the line of the match
   highlighted and all matches marked; a double-click or `Enter` opens it. Switch it off with *Show Preview* in the
   view's toolbar (or ⋮ menu), then a click opens the editor right away, like in VS Code
+- Syntax highlighting in the preview, with what the installed Eclipse has: Java files in the colors of the Java
+  editor (JDT), including the semantic highlighting of fields, static members, local variables and so on, which
+  follows a moment later once the file is parsed in the background; other languages with the TextMate grammars of
+  TM4E (its language pack covers e.g. XML, YAML, JSON, TypeScript, Markdown). Without them the preview stays plain
+  text, nothing needs to be installed for the plugin. Files over 1 MB and minified files stay plain too
+- The matches are marked in open editors like File Search marks them: highlighted and in the overview ruler, as set
+  in *General > Editors > Text Editors > Annotations > Search Results*. The marks go away with the next search or
+  when the view is closed
 - Results update when files are saved. Dismissed results (Delete) come back with the next search, or when their file
   changes
 - Nested Maven modules imported as separate projects are reported once
@@ -124,8 +135,9 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 |---|---|
 | Open the view | `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS), *Search > Eklipse Search...*, or *Window > Show View > General > Search* (the one with the blue magnifier, Eclipse's own search results view has the same name) |
 | Prefill | select text in an editor before opening the view |
-| Toggle match case / whole word / regex / preserve case | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` (`⌥` on macOS), or click the buttons |
+| Toggle match case / whole word / regex / preserve case / skip derived resources | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` / `Alt+D` (`⌥` on macOS), or click the buttons |
 | Jump into the results | `↓` in the search field |
+| Reuse an include/exclude pattern | the arrow next to the field, or `↓` in it |
 | Preview a match | click it: the file shows below the results. With *Show Preview* off, it opens in the editor without leaving the view |
 | Open a match | double-click or `Enter` |
 | Dismiss | `Delete` / `Backspace` |
@@ -148,6 +160,7 @@ Comma separated, matched case insensitively against workspace paths such as `my-
 | `*.java` | Java files in any folder |
 | `src/main/**` | everything below any `src/main` |
 | `node_modules` | the folder `node_modules` anywhere, with everything inside |
+| `testbundle.*` | the projects (and folders) whose name starts with `testbundle.`, with everything inside |
 | `*.{js,ts}` | `.js` and `.ts` files |
 | `/my-project/docs` | only below `docs` of the project `my-project` |
 
@@ -157,8 +170,9 @@ Needs Java 21 to run the build, Maven is downloaded by the wrapper. On Windows u
 
 ```sh
 ./mvnw verify                                 # plugin, unit/integration tests, update site
-./mvnw verify -Pui-tests                      # additionally drives the view in a real workbench window and checks
-                                              # that typing a query with 20 000 results doesn't freeze the UI;
+./mvnw verify -Pui-tests                      # additionally drives the view in a real workbench window (with JDT
+                                              # and TM4E for the preview colors) and checks that typing a query with
+                                              # 20 000 results or previewing a big Java file doesn't freeze the UI;
                                               # screenshots end up in com.eklipse.search.uitests/target/screenshots
 ./mvnw verify -Declipse.release=2026-09 -Dbuild.ee=JavaSE-21
                                               # build and test against a newer Eclipse release (needs Java 21)

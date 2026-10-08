@@ -5,8 +5,9 @@ import org.eclipse.swt.graphics.ImageData;
 import org.eclipse.swt.graphics.PaletteData;
 
 /**
- * The replace toggle's chevron, drawn in code so it is crisp at any zoom. Mid gray like Eclipse's find/replace
- * overlay icons, so it is visible on light and dark themes (Eclipse's own chevron icons are near black).
+ * The chevrons of the replace toggle and the history drop-downs, drawn in code so they are crisp at any zoom. Mid
+ * gray like Eclipse's find/replace overlay icons, so they are visible on light and dark themes (Eclipse's own chevron
+ * icons are near black).
  */
 final class ChevronImage {
 

@@ -13,6 +13,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BooleanSupplier;
@@ -25,6 +28,9 @@ import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IProjectDescription;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.ILogListener;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Platform;
 import org.eclipse.e4.ui.model.application.ui.basic.MPart;
 import org.eclipse.e4.ui.model.application.ui.basic.MPartSashContainerElement;
 import org.eclipse.e4.ui.model.application.ui.basic.MPartStack;
@@ -33,6 +39,8 @@ import org.eclipse.e4.ui.model.application.ui.basic.MWindow;
 import org.eclipse.e4.ui.workbench.modeling.EModelService;
 import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.ITextSelection;
+import org.eclipse.jface.text.Position;
+import org.eclipse.jface.text.source.IAnnotationModel;
 import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyleRange;
@@ -46,6 +54,7 @@ import org.eclipse.swt.graphics.Rectangle;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolItem;
 import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.ui.IWorkbenchPage;
@@ -303,6 +312,151 @@ class SearchViewUiTest {
 		click(view.getResult().get(configuration).getMatches().get(0));
 		processEvents();
 		assertEquals(1, page.getEditorReferences().length, "a click opens the editor");
+	}
+
+	@Test
+	void previewColorsTheSyntaxBelowTheMarks() throws Exception {
+		view.activateSearch("sms");
+		waitForSearch();
+		StyledText preview = view.getPreview().getTextWidget();
+
+		// Java, colored by JDT right away
+		List<LineMatch> javaMatches = view.getResult()
+				.get(project.getFile("src/com/example/ExternalMessengerConfiguration.java")).getMatches();
+		click(javaMatches.get(0));
+		waitUntil(() -> CONFIGURATION.equals(preview.getText()), 5_000);
+		assertNotNull(preview.getStyleRangeAtOffset(0).foreground, "the keyword 'package' is colored");
+		assertMarked(preview, javaMatches.get(0), true);
+		// the semantic highlighting follows from the parsed file (behind the 'sms' match), the marks below must survive it
+		int field = CONFIGURATION.indexOf("return smsTwilioAccountSid") + "return sms".length();
+		StyleRange lexical = preview.getStyleRangeAtOffset(field);
+		waitUntil(() -> {
+			StyleRange range = preview.getStyleRangeAtOffset(field);
+			return range != null && !range.similarTo(lexical);
+		}, 10_000);
+		screenshot(view.getRoot(), "9-preview-java");
+
+		// the box moves to the next match, the colors stay
+		click(javaMatches.get(1));
+		waitUntil(() -> preview.getStyleRangeAtOffset(javaMatches.get(1).getOffset()).borderStyle == SWT.BORDER_SOLID,
+				5_000);
+		assertMarked(preview, javaMatches.get(0), false);
+		assertMarked(preview, javaMatches.get(1), true);
+
+		// Markdown, colored by TM4E in the background: its colors must not wipe the marks
+		LineMatch heading = view.getResult().get(project.getFile("docs/README.md")).getMatches().get(0);
+		click(heading);
+		waitUntil(() -> {
+			StyleRange range = preview.getStyleRangeAtOffset(heading.getOffset() + heading.getLength());
+			return README.equals(preview.getText()) && range != null && range.foreground != null;
+		}, 10_000);
+		waitUntil(() -> false, 300);
+		assertMarked(preview, heading, true);
+		screenshot(view.getRoot(), "10-preview-markdown");
+	}
+
+	@Test
+	void previewSwitchesFromALongToAShortFile() throws Exception {
+		StringBuilder code = new StringBuilder("class Long {\n");
+		for (int i = 0; i < 150; i++) {
+			code.append(i == 140 ? "\tString smsLate;\n" : "\tint field" + i + ";\n");
+		}
+		IFile longFile = createFile("src/com/example/Long.java", code.append("}\n").toString());
+		view.activateSearch("sms");
+		waitForSearch();
+		StyledText preview = view.getPreview().getTextWidget();
+		click(view.getResult().get(longFile).getMatches().get(0));
+		waitUntil(() -> preview.getText().startsWith("class Long"), 5_000);
+
+		// the line number ruler gets narrower and resizes the preview while the short file is set; a later update of
+		// the selection may repair the preview, so the log tells
+		List<IStatus> errors = new ArrayList<>();
+		ILogListener listener = (status, plugin) -> {
+			if (status.getSeverity() == IStatus.ERROR) {
+				errors.add(status);
+			}
+		};
+		Platform.addLogListener(listener);
+		try {
+			click(view.getResult().get(project.getFile("docs/README.md")).getMatches().get(0));
+			waitUntil(() -> README.equals(preview.getText()), 5_000);
+			processEvents();
+		} finally {
+			Platform.removeLogListener(listener);
+		}
+		assertTrue(errors.isEmpty(), errors::toString);
+	}
+
+	@Test
+	void remembersTheRecentFilters() throws Exception {
+		Text include = view.getIncludeText();
+		// typing isn't remembered, leaving the field or Enter is
+		for (String value : new String[] { "*.j", "*.ja", "*.java" }) {
+			include.setText(value);
+		}
+		include.notifyListeners(SWT.FocusOut, new Event());
+		include.setText("*.md");
+		include.notifyListeners(SWT.DefaultSelection, new Event());
+		include.setText("*.java");
+		include.notifyListeners(SWT.FocusOut, new Event());
+		assertEquals(List.of("*.java", "*.md"), view.getIncludeHistory().getEntries().subList(0, 2));
+		assertFalse(view.getIncludeHistory().getEntries().contains("*.ja"));
+
+		// and after reopening the view
+		List<String> entries = view.getIncludeHistory().getEntries();
+		page.hideView(view);
+		view = (SearchView) page.showView(SearchView.ID);
+		assertEquals(entries, view.getIncludeHistory().getEntries());
+	}
+
+	@Test
+	void marksTheMatchesInOpenEditors() throws Exception {
+		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
+		ITextEditor editor = (ITextEditor) IDE.openEditor(page, configuration);
+		view.activateSearch("sendSms");
+		waitForSearch();
+		waitUntil(() -> searchMarks(editor).size() == 1, 5_000);
+		assertEquals(CONFIGURATION.indexOf("sendSms"), searchMarks(editor).get(0).getOffset());
+
+		// the next search replaces them, an editor opened later is marked too
+		view.activateSearch("sms");
+		waitForSearch();
+		IFile readme = project.getFile("docs/README.md");
+		IDE.setDefaultEditor(readme, "org.eclipse.ui.DefaultTextEditor");
+		ITextEditor readmeEditor = (ITextEditor) IDE.openEditor(page, readme);
+		waitUntil(() -> searchMarks(editor).size() == 11 && searchMarks(readmeEditor).size() == 3, 5_000);
+		screenshot(editor.getAdapter(Control.class), "11-editor-marks");
+
+		// closing the view removes them
+		page.hideView(view);
+		assertEquals(List.of(), searchMarks(editor));
+		view = (SearchView) page.showView(SearchView.ID);
+	}
+
+	/**
+	 * @return the positions of the search result annotations in the editor, sorted
+	 */
+	private static List<Position> searchMarks(ITextEditor editor) {
+		IAnnotationModel model = editor.getDocumentProvider().getAnnotationModel(editor.getEditorInput());
+		List<Position> positions = new ArrayList<>();
+		model.getAnnotationIterator().forEachRemaining(annotation -> {
+			if ("org.eclipse.search.results".equals(annotation.getType())) {
+				positions.add(model.getPosition(annotation));
+			}
+		});
+		positions.sort(Comparator.comparingInt(Position::getOffset));
+		return positions;
+	}
+
+	/**
+	 * Asserts that a match is marked, in the text color whatever the syntax highlighting colors around it.
+	 */
+	private static void assertMarked(StyledText preview, LineMatch match, boolean boxed) {
+		StyleRange range = preview.getStyleRangeAtOffset(match.getOffset());
+		assertNotNull(range.background, "the match is marked");
+		assertEquals(preview.getForeground(), range.foreground, "the match is in the text color");
+		assertEquals(boxed ? SWT.BORDER_SOLID : SWT.NONE, range.borderStyle, "the selected match is boxed");
 	}
 
 	@Test

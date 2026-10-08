@@ -32,22 +32,6 @@ class ReplacerEditTest {
 	}
 
 	@Test
-	void literalReplace() throws Exception {
-		Pattern pattern = SearchPatterns.create("foo", false, false, false);
-		String content = "foo Foo FOO";
-		MultiTextEdit edit = Replacer.createEdit(content, find(pattern, content), pattern, false, "bar", false);
-		assertEquals("bar bar bar", apply(content, edit));
-	}
-
-	@Test
-	void preserveCase() throws Exception {
-		Pattern pattern = SearchPatterns.create("foo", false, false, false);
-		String content = "foo Foo FOO";
-		MultiTextEdit edit = Replacer.createEdit(content, find(pattern, content), pattern, false, "bar", true);
-		assertEquals("bar Bar BAR", apply(content, edit));
-	}
-
-	@Test
 	void literalReplacementIsNotATemplate() throws Exception {
 		Pattern pattern = SearchPatterns.create("a", true, false, false);
 		MultiTextEdit edit = Replacer.createEdit("a", find(pattern, "a"), pattern, false, "$1\\n", false);

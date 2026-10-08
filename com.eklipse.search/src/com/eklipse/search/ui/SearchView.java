@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.DoubleAdder;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -31,7 +32,9 @@ import org.eclipse.core.runtime.Adapters;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.ILog;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.ProgressMonitorWrapper;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.IJobChangeEvent;
 import org.eclipse.core.runtime.jobs.Job;
@@ -47,6 +50,7 @@ import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.layout.GridLayoutFactory;
 import org.eclipse.jface.resource.ImageDescriptor;
+import org.eclipse.jface.preference.JFacePreferences;
 import org.eclipse.jface.resource.JFaceColors;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.resource.LocalResourceManager;
@@ -66,13 +70,13 @@ import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
-import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Listener;
+import org.eclipse.swt.widgets.ProgressBar;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
@@ -119,6 +123,10 @@ public class SearchView extends ViewPart {
 	private static final int UPDATE_INTERVAL_MS = 100;
 	/** How long the previous results stay when a new search finds nothing at first. */
 	private static final int STALE_RESULTS_MS = 500;
+	/** Faster searches, e.g. while typing more, would only flash the progress bar. */
+	private static final int PROGRESS_DELAY_MS = 300;
+	private static final int PROGRESS_STEPS = 1000;
+	private static final int PROGRESS_WIDTH = 80;
 	private static final int LABEL_REFRESH_DELAY_MS = 100;
 	private static final int FILE_REFRESH_DELAY_MS = 300;
 	/** Short enough to feel instant on a click, long enough to skip the results passed when holding an arrow key. */
@@ -130,13 +138,15 @@ public class SearchView extends ViewPart {
 	/** Width taken by the tree's indentation and expand arrows before a match line starts. */
 	private static final int PREVIEW_INDENT = 40;
 	private static final String DEFAULT_INCLUDES = "*.java";
-	private static final String DEFAULT_EXCLUDES = "**/node_modules";
+	private static final String DEFAULT_EXCLUDES = "testbundle.*, **/node_modules";
 	private static final int[] DEFAULT_PREVIEW_WEIGHTS = { 3, 2 };
 
 	private static final String KEY_QUERY = "query";
 	private static final String KEY_REPLACE = "replace";
 	private static final String KEY_INCLUDES = "includes";
 	private static final String KEY_EXCLUDES = "excludes";
+	private static final String KEY_INCLUDE_HISTORY = "includeHistory";
+	private static final String KEY_EXCLUDE_HISTORY = "excludeHistory";
 	private static final String KEY_CASE = "caseSensitive";
 	private static final String KEY_WORD = "wholeWord";
 	private static final String KEY_REGEX = "regex";
@@ -156,20 +166,25 @@ public class SearchView extends ViewPart {
 	private Text replaceText;
 	private Text includeText;
 	private Text excludeText;
+	private FieldHistory includeHistory;
+	private FieldHistory excludeHistory;
 	private ToolItem replaceToggleItem;
 	private ToolItem caseItem;
 	private ToolItem wordItem;
 	private ToolItem regexItem;
 	private ToolItem preserveCaseItem;
 	private ToolItem replaceAllItem;
-	private Button derivedButton;
+	private ToolItem derivedItem;
 	private Composite searchRow;
 	private Composite replaceRow;
 	private Composite detailsArea;
 	private Label summaryLabel;
+	private ProgressBar progressBar;
+	private Label durationLabel;
 	private SashForm resultSash;
 	private TreeViewer viewer;
 	private PreviewPane preview;
+	private EditorMatchMarks editorMarks;
 
 	private Action refreshAction;
 	private Action clearAction;
@@ -213,6 +228,11 @@ public class SearchView extends ViewPart {
 		/** Whether only the files of the previous search were searched, see {@link SearchQuery#isNarrowedBy}. */
 		final boolean narrowed;
 		final long startedAt = System.currentTimeMillis();
+		/** Set when the search is done. */
+		volatile long finishedAt;
+		/** The files to search as the search engine reports them, and how many it has searched so far. */
+		volatile double totalWork;
+		final DoubleAdder worked = new DoubleAdder();
 		final ConcurrentLinkedQueue<LineMatch> incoming = new ConcurrentLinkedQueue<>();
 		/** The files with matches, also those dismissed later. */
 		final Set<IFile> hitFiles = ConcurrentHashMap.newKeySet();
@@ -255,6 +275,7 @@ public class SearchView extends ViewPart {
 		createDetailsArea(parent);
 		createSummary(parent);
 		createViewer(parent);
+		editorMarks = new EditorMatchMarks(getSite().getPage(), () -> result);
 		createActions();
 		contributeToActionBars();
 		hookContextMenu();
@@ -301,9 +322,9 @@ public class SearchView extends ViewPart {
 		searchText.setMessage("Search");
 		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(searchText);
 		ToolBar optionsBar = createRowToolBar(searchRow);
-		caseItem = createToggle(optionsBar, "case_sensitive", "Aa", "Match Case", 'C');
-		wordItem = createToggle(optionsBar, "whole_word", "ab", "Match Whole Word", 'W');
-		regexItem = createToggle(optionsBar, "regex", ".*", "Use Regular Expression", 'R');
+		caseItem = createToggle(optionsBar, overlayIcon("case_sensitive"), "Aa", "Match Case", 'C');
+		wordItem = createToggle(optionsBar, overlayIcon("whole_word"), "ab", "Match Whole Word", 'W');
+		regexItem = createToggle(optionsBar, overlayIcon("regex"), ".*", "Use Regular Expression", 'R');
 
 		replaceRow = createRow(fields);
 		replaceText = new Text(replaceRow, SWT.SINGLE | SWT.BORDER);
@@ -312,7 +333,7 @@ public class SearchView extends ViewPart {
 		ToolBar replaceBar = createRowToolBar(replaceRow);
 		preserveCaseItem = createToggle(replaceBar, null, "AB", "Preserve Case", 'P');
 		replaceAllItem = new ToolItem(replaceBar, SWT.PUSH);
-		setIcon(replaceAllItem, "replace_all", "All");
+		setIcon(replaceAllItem, overlayIcon("replace_all"), "All");
 		replaceAllItem.setToolTipText("Replace All (" + (Util.isMac() ? "⌘↩" : "Ctrl+Enter") + ")");
 	}
 
@@ -333,7 +354,7 @@ public class SearchView extends ViewPart {
 		return bar;
 	}
 
-	private ToolItem createToggle(ToolBar bar, String icon, String text, String description, char key) {
+	private ToolItem createToggle(ToolBar bar, ImageDescriptor icon, String text, String description, char key) {
 		ToolItem item = new ToolItem(bar, SWT.CHECK);
 		setIcon(item, icon, text);
 		item.setToolTipText(description + " (" + (Util.isMac() ? "⌥" : "Alt+") + key + ")");
@@ -341,15 +362,20 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Uses the icon of Eclipse's own find/replace overlay if the installed Eclipse ships it (2026-09 does, 2024-03
-	 * doesn't), the compact text otherwise.
+	 * @return the icon of Eclipse's own find/replace overlay, {@code null} if the installed Eclipse doesn't ship it
+	 *         (2026-09 does, 2024-03 doesn't)
 	 */
-	private void setIcon(ToolItem item, String icon, String fallbackText) {
-		ImageDescriptor descriptor = icon == null ? null
-				: ResourceLocator.imageDescriptorFromBundle("org.eclipse.ui.workbench.texteditor",
-						"icons/full/elcl16/" + icon + ".png").orElse(null);
-		if (descriptor != null) {
-			item.setImage(resources.create(descriptor));
+	private static ImageDescriptor overlayIcon(String name) {
+		return ResourceLocator.imageDescriptorFromBundle("org.eclipse.ui.workbench.texteditor",
+				"icons/full/elcl16/" + name + ".png").orElse(null);
+	}
+
+	/**
+	 * @param icon {@code null} for the compact text
+	 */
+	private void setIcon(ToolItem item, ImageDescriptor icon, String fallbackText) {
+		if (icon != null) {
+			item.setImage(resources.create(icon));
 		} else {
 			item.setText(fallbackText);
 		}
@@ -376,35 +402,63 @@ public class SearchView extends ViewPart {
 	}
 
 	private void createDetailsArea(Composite parent) {
+		Composite row = new Composite(parent, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
+		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 0).applyTo(row);
+
 		// include and exclude side by side to save vertical space; they stack in a very narrow view
-		detailsArea = new Composite(parent, SWT.NONE);
+		detailsArea = new Composite(row, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(detailsArea);
 		GridLayoutFactory.fillDefaults().numColumns(2).equalWidth(true).spacing(6, 2).applyTo(detailsArea);
 
-		includeText = createFilterField(detailsArea, "files to include", "e.g. *.java, src/main/**");
-		excludeText = createFilterField(detailsArea, "files to exclude", "e.g. **/node_modules");
+		includeHistory = createFilterField(detailsArea, "files to include", "e.g. *.java, src/main/**");
+		includeText = includeHistory.getText();
+		excludeHistory = createFilterField(detailsArea, "files to exclude", "e.g. **/node_modules");
+		excludeText = excludeHistory.getText();
 
-		derivedButton = new Button(detailsArea, SWT.CHECK);
-		derivedButton.setText("Skip derived resources");
-		derivedButton.setToolTipText("Skips build output that Eclipse marks as derived, e.g. Maven target/ folders");
-		GridDataFactory.fillDefaults().span(2, 1).applyTo(derivedButton);
+		// at the height of the fields, below their labels; next to the exclude field when they stack
+		ToolBar derivedBar = new ToolBar(row, SWT.FLAT);
+		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.END).applyTo(derivedBar);
+		ImageDescriptor filter = ResourceLocator
+				.imageDescriptorFromBundle("org.eclipse.ui.ide", "icons/full/elcl16/filter_ps.png").orElse(null);
+		derivedItem = createToggle(derivedBar, filter, "D",
+				"Skip Derived Resources, the build output Eclipse marks as derived, e.g. Maven target/ folders", 'D');
 	}
 
-	private static Text createFilterField(Composite parent, String label, String hint) {
+	private FieldHistory createFilterField(Composite parent, String label, String hint) {
 		Composite box = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(box);
-		GridLayoutFactory.fillDefaults().spacing(0, 2).applyTo(box);
-		new Label(box, SWT.NONE).setText(label);
+		GridLayoutFactory.fillDefaults().numColumns(2).spacing(0, 2).applyTo(box);
+		Label title = new Label(box, SWT.NONE);
+		title.setText(label);
+		GridDataFactory.fillDefaults().span(2, 1).applyTo(title);
 		Text text = new Text(box, SWT.SINGLE | SWT.BORDER);
 		text.setMessage(hint);
 		text.setToolTipText(hint);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(text);
-		return text;
+		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(text);
+		ToolBar bar = new ToolBar(box, SWT.FLAT);
+		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.CENTER).applyTo(bar);
+		ToolItem dropDown = new ToolItem(bar, SWT.PUSH);
+		dropDown.setImage(resources.create(ChevronImage.descriptor(true)));
+		dropDown.setToolTipText("Recently Used (↓)");
+		return new FieldHistory(text, dropDown);
 	}
 
 	private void createSummary(Composite parent) {
-		summaryLabel = new Label(parent, SWT.WRAP);
+		Composite row = new Composite(parent, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
+		GridLayoutFactory.fillDefaults().numColumns(3).spacing(6, 0).applyTo(row);
+		summaryLabel = new Label(row, SWT.WRAP);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(summaryLabel);
+		// the progress while searching, then how long it took, in one place on the right
+		progressBar = new ProgressBar(row, SWT.HORIZONTAL);
+		progressBar.setMaximum(PROGRESS_STEPS);
+		GridDataFactory.fillDefaults().align(SWT.END, SWT.CENTER).hint(PROGRESS_WIDTH, SWT.DEFAULT).exclude(true)
+				.applyTo(progressBar);
+		progressBar.setVisible(false);
+		durationLabel = new Label(row, SWT.NONE);
+		durationLabel.setForeground(JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR));
+		GridDataFactory.fillDefaults().align(SWT.END, SWT.BEGINNING).applyTo(durationLabel);
 	}
 
 	private void createViewer(Composite parent) {
@@ -589,7 +643,7 @@ public class SearchView extends ViewPart {
 		}
 		preserveCaseItem.addListener(SWT.Selection, e -> scheduleLabelRefresh());
 		replaceAllItem.addListener(SWT.Selection, e -> replaceAll(true));
-		derivedButton.addListener(SWT.Selection, e -> scheduleSearch(0));
+		derivedItem.addListener(SWT.Selection, e -> scheduleSearch(0));
 
 		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
 		searchText.addListener(SWT.DefaultSelection, e -> scheduleSearch(0));
@@ -654,6 +708,7 @@ public class SearchView extends ViewPart {
 			case 'w' -> wordItem;
 			case 'r' -> regexItem;
 			case 'p' -> preserveCaseItem;
+			case 'd' -> derivedItem;
 			default -> null;
 		};
 		if (item != null) {
@@ -734,7 +789,7 @@ public class SearchView extends ViewPart {
 
 	private SearchQuery currentQuery() {
 		return new SearchQuery(searchText.getText(), caseItem.getSelection(), wordItem.getSelection(),
-				regexItem.getSelection(), includeText.getText(), excludeText.getText(), derivedButton.getSelection());
+				regexItem.getSelection(), includeText.getText(), excludeText.getText(), derivedItem.getSelection());
 	}
 
 	private void scheduleSearch(int delayMs) {
@@ -752,6 +807,8 @@ public class SearchView extends ViewPart {
 		SearchSession previous = session;
 		cancelSearch();
 		pendingRefresh.clear();
+		setProgressVisible(false);
+		setDuration("");
 
 		SearchQuery query = currentQuery();
 		if (query.isEmpty()) {
@@ -778,10 +835,30 @@ public class SearchView extends ViewPart {
 		setSummary("Searching…", false);
 		updateSelectionActions();
 
-		s.job = Job.create("Search: " + query.text(), monitor -> {
+		s.job = Job.create("Search: " + query.text(), jobMonitor -> {
 			Consumer<LineMatch> collector = match -> {
 				s.hitFiles.add(match.getFile());
 				s.incoming.add(match);
+			};
+			// the search engine reports the files to search and the ones searched, for the progress bar
+			IProgressMonitor monitor = new ProgressMonitorWrapper(jobMonitor) {
+				@Override
+				public void beginTask(String name, int totalWork) {
+					s.totalWork = totalWork;
+					super.beginTask(name, totalWork);
+				}
+
+				@Override
+				public void worked(int work) {
+					s.worked.add(work);
+					super.worked(work);
+				}
+
+				@Override
+				public void internalWorked(double work) {
+					s.worked.add(work);
+					super.internalWorked(work);
+				}
 			};
 			int max = TextSearcher.DEFAULT_MAX_RESULTS;
 			TextSearcher.Result outcome = files != null ? TextSearcher.search(files, s.pattern, max, collector, monitor)
@@ -794,6 +871,7 @@ public class SearchView extends ViewPart {
 		s.job.addJobChangeListener(new JobChangeAdapter() {
 			@Override
 			public void done(IJobChangeEvent event) {
+				s.finishedAt = System.currentTimeMillis();
 				s.done = true;
 			}
 		});
@@ -835,6 +913,7 @@ public class SearchView extends ViewPart {
 		result = newResult;
 		viewer.setInput(result);
 		preview.clear();
+		editorMarks.scheduleUpdate();
 		updateSelectionActions();
 	}
 
@@ -855,6 +934,14 @@ public class SearchView extends ViewPart {
 		// read the flag before draining: everything was queued before the job finished
 		boolean finished = s.done;
 		drain(s);
+		boolean slow = System.currentTimeMillis() - s.startedAt >= PROGRESS_DELAY_MS;
+		// like the summary drain just updated: gone as soon as the search is done
+		if (!s.done && slow && s.totalWork > 0) {
+			progressBar.setSelection((int) Math.min(PROGRESS_STEPS, s.worked.sum() * PROGRESS_STEPS / s.totalWork));
+			setProgressVisible(true);
+		} else {
+			setProgressVisible(false);
+		}
 		if (finished) {
 			updateSummary();
 			updateSelectionActions();
@@ -910,6 +997,7 @@ public class SearchView extends ViewPart {
 			tree.setRedraw(true);
 			fitColumn();
 		}
+		editorMarks.scheduleUpdate();
 		updateSummary();
 	}
 
@@ -940,6 +1028,7 @@ public class SearchView extends ViewPart {
 		}
 		setSummary(summary.toString(), false);
 		summaryLabel.setToolTipText(tooltip);
+		setDuration(formatDuration(s.finishedAt - s.startedAt));
 	}
 
 	private static String describe(IStatus status) {
@@ -960,6 +1049,25 @@ public class SearchView extends ViewPart {
 		summaryLabel.setText(text);
 		summaryLabel.setToolTipText(null);
 		summaryLabel.setForeground(error ? JFaceColors.getErrorText(display) : null);
+	}
+
+	private void setProgressVisible(boolean visible) {
+		if (progressBar.getVisible() != visible) {
+			((GridData) progressBar.getLayoutData()).exclude = !visible;
+			progressBar.setVisible(visible);
+			progressBar.getParent().layout(true);
+		}
+	}
+
+	private void setDuration(String text) {
+		if (!durationLabel.getText().equals(text)) {
+			durationLabel.setText(text);
+			durationLabel.getParent().layout(true);
+		}
+	}
+
+	private static String formatDuration(long millis) {
+		return millis < 1000 ? millis + " ms" : String.format("%.1f s", millis / 1000.0);
 	}
 
 	private void clear() {
@@ -1156,6 +1264,7 @@ public class SearchView extends ViewPart {
 			tree.setRedraw(true);
 			fitColumn();
 		}
+		editorMarks.scheduleUpdate();
 		updateSummary();
 		updateSelectionActions();
 	}
@@ -1240,6 +1349,7 @@ public class SearchView extends ViewPart {
 			tree.setRedraw(true);
 			fitColumn();
 		}
+		editorMarks.scheduleUpdate();
 		for (Object candidate : candidates) {
 			if (isInResult(candidate)) {
 				viewer.setSelection(new StructuredSelection(candidate), true);
@@ -1501,6 +1611,10 @@ public class SearchView extends ViewPart {
 		return includeText;
 	}
 
+	FieldHistory getIncludeHistory() {
+		return includeHistory;
+	}
+
 	Text getReplaceText() {
 		return replaceText;
 	}
@@ -1564,11 +1678,13 @@ public class SearchView extends ViewPart {
 		replaceText.setText(string(m, KEY_REPLACE, ""));
 		includeText.setText(string(m, KEY_INCLUDES, DEFAULT_INCLUDES));
 		excludeText.setText(string(m, KEY_EXCLUDES, DEFAULT_EXCLUDES));
+		includeHistory.restore(string(m, KEY_INCLUDE_HISTORY, null));
+		excludeHistory.restore(string(m, KEY_EXCLUDE_HISTORY, null));
 		caseItem.setSelection(bool(m, KEY_CASE, false));
 		wordItem.setSelection(bool(m, KEY_WORD, false));
 		regexItem.setSelection(bool(m, KEY_REGEX, false));
 		preserveCaseItem.setSelection(bool(m, KEY_PRESERVE_CASE, false));
-		derivedButton.setSelection(bool(m, KEY_DERIVED, true));
+		derivedItem.setSelection(bool(m, KEY_DERIVED, true));
 		boolean replaceVisible = bool(m, KEY_REPLACE_VISIBLE, false);
 		setVisible(replaceRow, replaceVisible);
 		updateReplaceToggle(replaceVisible);
@@ -1603,11 +1719,13 @@ public class SearchView extends ViewPart {
 		m.putString(KEY_REPLACE, replaceText.getText());
 		m.putString(KEY_INCLUDES, includeText.getText());
 		m.putString(KEY_EXCLUDES, excludeText.getText());
+		m.putString(KEY_INCLUDE_HISTORY, includeHistory.save());
+		m.putString(KEY_EXCLUDE_HISTORY, excludeHistory.save());
 		m.putBoolean(KEY_CASE, caseItem.getSelection());
 		m.putBoolean(KEY_WORD, wordItem.getSelection());
 		m.putBoolean(KEY_REGEX, regexItem.getSelection());
 		m.putBoolean(KEY_PRESERVE_CASE, preserveCaseItem.getSelection());
-		m.putBoolean(KEY_DERIVED, derivedButton.getSelection());
+		m.putBoolean(KEY_DERIVED, derivedItem.getSelection());
 		m.putBoolean(KEY_REPLACE_VISIBLE, isReplaceVisible());
 		m.putBoolean(KEY_PREVIEW, isPreviewVisible());
 		int[] weights = resultSash.getWeights();
@@ -1632,6 +1750,9 @@ public class SearchView extends ViewPart {
 		}
 		cancelSearch();
 		session = null;
+		if (editorMarks != null) {
+			editorMarks.dispose();
+		}
 		if (undoHandler != null) {
 			undoHandler.dispose();
 			redoHandler.dispose();

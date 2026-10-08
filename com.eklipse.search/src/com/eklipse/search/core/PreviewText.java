@@ -123,6 +123,13 @@ public final class PreviewText {
 	}
 
 	/**
+	 * @return {@code true} if a long line was shortened
+	 */
+	public boolean isShortened() {
+		return lineStarts != null;
+	}
+
+	/**
 	 * @param fileOffset an offset in the file, the end of a range included
 	 * @return the offset in {@link #text()}, {@code -1} if it was cut away
 	 */

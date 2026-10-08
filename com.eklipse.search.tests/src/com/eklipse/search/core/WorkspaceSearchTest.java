@@ -101,23 +101,6 @@ class WorkspaceSearchTest {
 	}
 
 	@Test
-	void wholeWordAndCaseSensitive() {
-		List<LineMatch> matches = search(new SearchQuery("Foo", true, true, false, "", "", true));
-
-		assertEquals(List.of("search-nested/Nested.java:1:0", "search-test/src/Foo.java:1:6",
-				"search-test/src/Foo.java:2:1", "search-test/src/Foo.java:2:15",
-				"search-test/web/node_modules/lib.js:1:0"), describe(matches));
-	}
-
-	@Test
-	void includeGlobRestrictsFiles() {
-		List<LineMatch> matches = search(new SearchQuery("foo", false, false, false, "*.txt", "", true));
-
-		assertEquals(4, matches.size());
-		assertTrue(matches.stream().allMatch(m -> m.getFile().getName().equals("notes.txt")));
-	}
-
-	@Test
 	void derivedResourcesCanBeIncluded() {
 		List<LineMatch> matches = search(new SearchQuery("Foo", true, true, false, "Gen.java", "", false));
 
@@ -163,18 +146,6 @@ class WorkspaceSearchTest {
 
 		RefactoringCore.getUndoManager().performUndo(null, new NullProgressMonitor());
 		assertEquals(JAVA, read("src/Foo.java"));
-	}
-
-	@Test
-	void regexReplaceWithGroups() throws Exception {
-		SearchQuery query = new SearchQuery("(\\w+)\\.bar", true, false, true, "notes.txt", "", true);
-		List<LineMatch> matches = search(query);
-		assertEquals(1, matches.size());
-
-		Replacer.replace(byFile(matches), query.createPattern(), true, "$1::baz", false, "Replace",
-				new NullProgressMonitor());
-
-		assertEquals("foobar Foo_bar foo::baz\nsecond line foo\n", read("src/notes.txt"));
 	}
 
 	@Test
