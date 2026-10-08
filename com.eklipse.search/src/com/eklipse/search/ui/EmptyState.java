@@ -24,18 +24,17 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Event;
 
+import com.eklipse.search.core.SearchQuery;
+
 /**
- * Shown instead of the results and the preview while nothing is searched: a magnifier over a misspelled line, a search
- * to try and a tip.
+ * Shown instead of the results and the preview while both would be empty: a magnifier, a search to try and a tip
+ * while nothing is searched, or what limited a search that found nothing.
  * <p>
  * Painted in the colors and font of the results tree, so it looks the same in light and dark theme.
  */
 final class EmptyState {
 
-	private static final String HEADING = "Nothing searched yet";
-	private static final String SUGGESTION_PREFIX = "Try searching for ";
-	private static final String SUGGESTION = "Spellcheck";
-	private static final String TIP_PREFIX = "Tip: ";
+	private static final String ELLIPSIS = "…";
 	private static final int MARGIN = 16;
 	private static final int ICON_SIZE = 72;
 	private static final int GAP = 14;
@@ -45,9 +44,15 @@ final class EmptyState {
 	private final Canvas canvas;
 	private final Control colors;
 	private final LocalResourceManager resources;
-	private final Consumer<String> search;
 	private final List<String> tips = tips();
 	private int tip = ThreadLocalRandom.current().nextInt(tips.size());
+	private boolean noResults;
+	private String heading;
+	private String suggestionPrefix;
+	private String suggestion;
+	private String suggestionSuffix;
+	/** The tip, or what limited the search, {@code null} for none. */
+	private String footer;
 	private Rectangle suggestionBounds = new Rectangle(0, 0, 0, 0);
 	private boolean hover;
 
@@ -60,7 +65,6 @@ final class EmptyState {
 	EmptyState(Composite parent, Control colors, LocalResourceManager resources, Consumer<String> search) {
 		this.colors = colors;
 		this.resources = resources;
-		this.search = search;
 		// a click shouldn't take the focus from the search field
 		canvas = new Canvas(parent, SWT.DOUBLE_BUFFERED | SWT.NO_FOCUS);
 		canvas.addListener(SWT.Paint, this::paint);
@@ -69,26 +73,50 @@ final class EmptyState {
 		canvas.addListener(SWT.MouseExit, e -> setHover(false));
 		canvas.addListener(SWT.MouseUp, e -> {
 			if (e.button == 1 && suggestionBounds.contains(e.x, e.y)) {
-				search.accept(SUGGESTION);
+				search.accept(suggestion);
 			}
 		});
 		canvas.getAccessible().addAccessibleListener(new AccessibleAdapter() {
 			@Override
 			public void getName(AccessibleEvent e) {
-				e.result = HEADING + ". " + SUGGESTION_PREFIX + SUGGESTION + ". " + TIP_PREFIX + tips.get(tip);
+				e.result = heading + ". " + suggestionPrefix + suggestion + suggestionSuffix
+						+ (footer != null ? ". " + footer : "");
 			}
 		});
+		showNothingSearched();
 	}
 
 	Control getControl() {
 		return canvas;
 	}
 
+	boolean isNothingSearched() {
+		return !noResults;
+	}
+
 	/**
-	 * Switches to another tip, so every empty search shows something new.
+	 * Shows that nothing is searched yet, with another tip than last time.
 	 */
-	void nextTip() {
+	void showNothingSearched() {
 		tip = (tip + 1 + ThreadLocalRandom.current().nextInt(tips.size() - 1)) % tips.size();
+		show(false, "Nothing searched yet", "Try searching for ", "Spellcheck", "", "Tip: " + tips.get(tip));
+	}
+
+	/**
+	 * @param query the search that found nothing
+	 */
+	void showNoResults(SearchQuery query) {
+		show(true, "Nothing matches “" + query.text() + "”", "Have you tried ", "Autocorrect", "?", limits(query));
+	}
+
+	private void show(boolean noResults, String heading, String suggestionPrefix, String suggestion,
+			String suggestionSuffix, String footer) {
+		this.noResults = noResults;
+		this.heading = heading;
+		this.suggestionPrefix = suggestionPrefix;
+		this.suggestion = suggestion;
+		this.suggestionSuffix = suggestionSuffix;
+		this.footer = footer;
 		canvas.redraw();
 	}
 
@@ -103,6 +131,38 @@ final class EmptyState {
 				ctrl + "C copies the selected results with their line numbers.",
 				(Util.isMac() ? "⌘↩" : "Ctrl+Enter") + " in the replace field replaces all matches.",
 				"Include src/main/** to leave out the tests.");
+	}
+
+	/**
+	 * @return what easily hides a match, e.g. "Searched only *.java, with match case.", {@code null} for nothing; the
+	 *         excludes are left out, they are set once and rarely the reason
+	 */
+	private static String limits(SearchQuery query) {
+		List<String> options = new ArrayList<>();
+		if (query.caseSensitive()) {
+			options.add("match case");
+		}
+		if (query.wholeWord()) {
+			options.add("whole word");
+		}
+		if (query.regex()) {
+			options.add("regex");
+		}
+		String includes = query.includes().trim();
+		if (includes.isEmpty() && options.isEmpty()) {
+			return null;
+		}
+		StringBuilder text = new StringBuilder("Searched");
+		if (!includes.isEmpty()) {
+			text.append(" only ").append(includes);
+		}
+		if (!options.isEmpty()) {
+			text.append(includes.isEmpty() ? " with " : ", with ");
+			int last = options.size() - 1;
+			text.append(last == 0 ? options.get(0)
+					: String.join(", ", options.subList(0, last)) + " and " + options.get(last));
+		}
+		return text.append('.').toString();
 	}
 
 	private void setHover(boolean hover) {
@@ -126,49 +186,55 @@ final class EmptyState {
 		Font font = colors.getFont();
 		Font headingFont = resources.create(FontDescriptor.createFrom(font).setStyle(SWT.BOLD).increaseHeight(1));
 		gc.setFont(headingFont);
-		List<String> heading = wrap(gc, HEADING, width);
+		List<String> headingLines = wrap(gc, heading, width);
 		int headingLine = gc.getFontMetrics().getHeight();
 		gc.setFont(font);
-		List<String> tipLines = wrap(gc, TIP_PREFIX + tips.get(tip), width);
+		List<String> footerLines = footer != null ? wrap(gc, footer, width) : List.of();
 		int line = gc.getFontMetrics().getHeight();
-		int height = ICON_SIZE + GAP + heading.size() * headingLine + GAP / 2 + line + GAP + tipLines.size() * line;
+		int height = ICON_SIZE + GAP + headingLines.size() * headingLine + GAP / 2 + line
+				+ (footerLines.isEmpty() ? 0 : GAP + footerLines.size() * line);
 		// a bit above the middle looks centered
 		int y = area.y + Math.max(MARGIN, (area.height - height) * 2 / 5);
 
-		drawIcon(gc, area.x + (area.width - ICON_SIZE) / 2, y, mix(background, foreground, ICON_TEXT_SHARE));
+		drawIcon(gc, area.x + (area.width - ICON_SIZE) / 2, y, mix(background, foreground, ICON_TEXT_SHARE),
+				!noResults);
 		y += ICON_SIZE + GAP;
 
 		gc.setForeground(foreground);
 		gc.setFont(headingFont);
-		y = drawCentered(gc, heading, area, y, headingLine);
+		y = drawCentered(gc, headingLines, area, y, headingLine);
 		y += GAP / 2;
 
 		gc.setFont(font);
 		Color qualifier = JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR);
 		Color link = JFaceResources.getColorRegistry().get(JFacePreferences.HYPERLINK_COLOR);
-		int prefixWidth = gc.textExtent(SUGGESTION_PREFIX).x;
-		Point suggestion = gc.textExtent(SUGGESTION);
-		int x = area.x + Math.max(MARGIN, (area.width - prefixWidth - suggestion.x) / 2);
+		int prefixWidth = gc.textExtent(suggestionPrefix).x;
+		Point suggestionSize = gc.textExtent(suggestion);
+		int lineWidth = prefixWidth + suggestionSize.x + gc.textExtent(suggestionSuffix).x;
+		int x = area.x + Math.max(MARGIN, (area.width - lineWidth) / 2);
+		int suggestionX = x + prefixWidth;
 		gc.setForeground(qualifier != null ? qualifier : foreground);
-		gc.drawText(SUGGESTION_PREFIX, x, y, true);
+		gc.drawText(suggestionPrefix, x, y, true);
+		gc.drawText(suggestionSuffix, suggestionX + suggestionSize.x, y, true);
 		gc.setForeground(link != null ? link : canvas.getDisplay().getSystemColor(SWT.COLOR_LINK_FOREGROUND));
-		gc.drawText(SUGGESTION, x + prefixWidth, y, true);
-		suggestionBounds = new Rectangle(x + prefixWidth, y, suggestion.x, suggestion.y);
+		gc.drawText(suggestion, suggestionX, y, true);
+		suggestionBounds = new Rectangle(suggestionX, y, suggestionSize.x, suggestionSize.y);
 		if (hover) {
 			int underline = y + gc.getFontMetrics().getAscent() + 1;
 			gc.setLineWidth(1);
-			gc.drawLine(x + prefixWidth, underline, x + prefixWidth + suggestion.x, underline);
+			gc.drawLine(suggestionX, underline, suggestionX + suggestionSize.x, underline);
 		}
 		y += line + GAP;
 
 		gc.setForeground(qualifier != null ? qualifier : foreground);
-		drawCentered(gc, tipLines, area, y, line);
+		drawCentered(gc, footerLines, area, y, line);
 	}
 
 	/**
-	 * A magnifier over two lines of text, the second one underlined like a spelling mistake.
+	 * A magnifier over two lines of text, the second one underlined like a spelling mistake, or over nothing but the
+	 * spelling mistake.
 	 */
-	private static void drawIcon(GC gc, int x, int y, Color color) {
+	private static void drawIcon(GC gc, int x, int y, Color color, boolean text) {
 		int radius = 22;
 		int cx = x + 30;
 		int cy = y + 30;
@@ -180,16 +246,21 @@ final class EmptyState {
 		gc.setLineWidth(8);
 		gc.drawLine(cx + handleStart, cy + handleStart, x + ICON_SIZE - 6, y + ICON_SIZE - 6);
 
-		gc.setLineWidth(3);
-		gc.drawLine(cx - 11, cy - 6, cx + 11, cy - 6);
-		gc.drawLine(cx - 11, cy + 3, cx + 7, cy + 3);
+		int squiggleY = cy;
+		if (text) {
+			gc.setLineWidth(3);
+			gc.drawLine(cx - 11, cy - 6, cx + 11, cy - 6);
+			gc.drawLine(cx - 11, cy + 3, cx + 7, cy + 3);
+			squiggleY = cy + 8;
+		}
 		Color error = JFaceResources.getColorRegistry().get(JFacePreferences.ERROR_COLOR);
 		gc.setForeground(error != null ? error : gc.getDevice().getSystemColor(SWT.COLOR_RED));
 		gc.setLineWidth(2);
 		int[] squiggle = new int[14];
+		int left = text ? cx - 11 : cx - 9;
 		for (int i = 0; i < squiggle.length / 2; i++) {
-			squiggle[2 * i] = cx - 11 + 3 * i;
-			squiggle[2 * i + 1] = cy + (i % 2 == 0 ? 8 : 11);
+			squiggle[2 * i] = left + 3 * i;
+			squiggle[2 * i + 1] = squiggleY + (i % 2 == 0 ? 0 : 3);
 		}
 		gc.drawPolyline(squiggle);
 		gc.setLineCap(SWT.CAP_FLAT);
@@ -205,22 +276,36 @@ final class EmptyState {
 	}
 
 	/**
-	 * @return the text broken into lines at spaces, each fitting into the width unless a single word doesn't
+	 * @return the text broken into lines at spaces, each fitting into the width; a word too long for a line of its
+	 *         own, e.g. a long search text, is cut off with an ellipsis
 	 */
 	private static List<String> wrap(GC gc, String text, int width) {
 		List<String> lines = new ArrayList<>();
 		String line = "";
 		for (String word : text.split(" ")) {
 			String longer = line.isEmpty() ? word : line + " " + word;
-			if (!line.isEmpty() && gc.textExtent(longer).x > width) {
-				lines.add(line);
-				line = word;
-			} else {
+			if (gc.textExtent(longer).x <= width) {
 				line = longer;
+			} else {
+				if (!line.isEmpty()) {
+					lines.add(line);
+				}
+				line = ellipsize(gc, word, width);
 			}
 		}
 		lines.add(line);
 		return lines;
+	}
+
+	private static String ellipsize(GC gc, String text, int width) {
+		if (gc.textExtent(text).x <= width) {
+			return text;
+		}
+		int end = text.length() - 1;
+		while (end > 1 && gc.textExtent(text.substring(0, end) + ELLIPSIS).x > width) {
+			end--;
+		}
+		return text.substring(0, end) + ELLIPSIS;
 	}
 
 	private static Color mix(Color background, Color text, double textShare) {

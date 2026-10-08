@@ -976,7 +976,7 @@ public class SearchView extends ViewPart {
 	private void showResult(SearchResult newResult) {
 		result = newResult;
 		viewer.setInput(result);
-		setEmptyStateVisible(session == null && searchText.getText().isEmpty());
+		updateEmptyState();
 		preview.clear();
 		editorMarks.scheduleUpdate();
 		updateSelectionActions();
@@ -1072,6 +1072,7 @@ public class SearchView extends ViewPart {
 	}
 
 	private void updateSummary() {
+		updateEmptyState();
 		SearchSession s = session;
 		if (s == null) {
 			return;
@@ -1122,14 +1123,28 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Shows the empty state instead of the results and the preview, which would both be empty.
+	 * Shows the empty state instead of the results and the preview while both would be empty: nothing is searched, or
+	 * the search found nothing. A search without results so far keeps what's shown, so the tree doesn't blink empty.
 	 */
+	private void updateEmptyState() {
+		SearchSession s = session;
+		if (s == null) {
+			boolean nothingSearched = searchText.getText().isEmpty();
+			if (nothingSearched && (!emptyState.getControl().getVisible() || !emptyState.isNothingSearched())) {
+				emptyState.showNothingSearched();
+			}
+			setEmptyStateVisible(nothingSearched);
+		} else if (s.shown && result.getMatchCount() > 0) {
+			setEmptyStateVisible(false);
+		} else if (s.shown && s.done && s.incoming.isEmpty()) {
+			emptyState.showNoResults(s.query);
+			setEmptyStateVisible(true);
+		}
+	}
+
 	private void setEmptyStateVisible(boolean visible) {
 		Control control = emptyState.getControl();
 		if (control.getVisible() != visible) {
-			if (visible) {
-				emptyState.nextTip();
-			}
 			((GridData) control.getLayoutData()).exclude = !visible;
 			control.setVisible(visible);
 			((GridData) resultSash.getLayoutData()).exclude = visible;

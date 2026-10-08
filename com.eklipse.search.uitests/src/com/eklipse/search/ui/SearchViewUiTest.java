@@ -184,6 +184,7 @@ class SearchViewUiTest {
 
 		view.replaceAll(false);
 		waitUntil(() -> "No results found.".equals(view.getSummary()), 10_000);
+		assertFalse(view.getViewer().getTree().isVisible(), "the empty state replaces the results");
 		assertEquals(CONFIGURATION.replace("smsSentFailed", "textSentFailed")
 				.replace("smsTwilioAccountSid", "textTwilioAccountSid").replace("smsSender", "textSender"),
 				read("src/com/example/ExternalMessengerConfiguration.java"));
@@ -274,6 +275,11 @@ class SearchViewUiTest {
 		view.getSearchText().setText("");
 		waitForSearch();
 		screenshot(view.getRoot(), "7-sidebar-very-narrow-empty");
+
+		view.getSearchText().setText("asdasdasdasdsadasdasdasdasdsadasd");
+		waitForSearch();
+		assertEquals("No results found.", view.getSummary());
+		screenshot(view.getRoot(), "7-sidebar-very-narrow-no-results");
 	}
 
 	@Test
