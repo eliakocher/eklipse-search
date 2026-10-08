@@ -189,6 +189,7 @@ public class SearchView extends ViewPart {
 	private SashForm resultSash;
 	private ResultViewer viewer;
 	private PreviewPane preview;
+	private EmptyState emptyState;
 	private EditorMatchMarks editorMarks;
 
 	private Action refreshAction;
@@ -478,6 +479,10 @@ public class SearchView extends ViewPart {
 		preview = new PreviewPane(resultSash);
 		resultSash.setWeights(DEFAULT_PREVIEW_WEIGHTS);
 		drawSashLines();
+		emptyState = new EmptyState(parent, tree, resources, this::activateSearch);
+		GridDataFactory.fillDefaults().grab(true, true).exclude(true).applyTo(emptyState.getControl());
+		emptyState.getControl().setVisible(false);
+		setEmptyStateVisible(true);
 		GC gc = new GC(viewer.getTree());
 		try {
 			averageCharWidth = gc.getFontMetrics().getAverageCharacterWidth();
@@ -971,6 +976,7 @@ public class SearchView extends ViewPart {
 	private void showResult(SearchResult newResult) {
 		result = newResult;
 		viewer.setInput(result);
+		setEmptyStateVisible(session == null && searchText.getText().isEmpty());
 		preview.clear();
 		editorMarks.scheduleUpdate();
 		updateSelectionActions();
@@ -1113,6 +1119,23 @@ public class SearchView extends ViewPart {
 		summaryLabel.setText(text);
 		summaryLabel.setToolTipText(null);
 		summaryLabel.setForeground(error ? JFaceColors.getErrorText(display) : null);
+	}
+
+	/**
+	 * Shows the empty state instead of the results and the preview, which would both be empty.
+	 */
+	private void setEmptyStateVisible(boolean visible) {
+		Control control = emptyState.getControl();
+		if (control.getVisible() != visible) {
+			if (visible) {
+				emptyState.nextTip();
+			}
+			((GridData) control.getLayoutData()).exclude = !visible;
+			control.setVisible(visible);
+			((GridData) resultSash.getLayoutData()).exclude = visible;
+			resultSash.setVisible(!visible);
+			control.getParent().layout(true);
+		}
 	}
 
 	private void setProgressVisible(boolean visible) {

@@ -162,10 +162,12 @@ class SearchViewUiTest {
 	@Test
 	void searchToggleReplaceUndoAndOpen() throws Exception {
 		waitForSearch();
+		assertFalse(view.getViewer().getTree().isVisible(), "the empty state replaces the results");
 		screenshot(view.getRoot(), "0-empty");
 		view.activateSearch("sms");
 		waitForSearch();
 		assertEquals("16 results in 3 files", view.getSummary());
+		assertTrue(view.getViewer().getTree().isVisible());
 		screenshot(view.getRoot(), "1-search");
 
 		toggle(view.getCaseItem());
@@ -243,6 +245,7 @@ class SearchViewUiTest {
 		if (!view.getReplaceText().isVisible()) {
 			toggle(view.getReplaceToggleItem());
 		}
+		screenshot(view.getRoot(), "5-sidebar-empty");
 		view.activateSearch("sms");
 		waitForSearch();
 		assertEquals("16 results in 3 files", view.getSummary());
@@ -267,6 +270,10 @@ class SearchViewUiTest {
 		assertTrue(view.getRoot().getSize().x < 260, "side bar width " + view.getRoot().getSize().x);
 		assertTrue(options.getBounds().y > searchField.getBounds().y, "options should wrap below the field");
 		screenshot(view.getRoot(), "7-sidebar-very-narrow");
+
+		view.getSearchText().setText("");
+		waitForSearch();
+		screenshot(view.getRoot(), "7-sidebar-very-narrow-empty");
 	}
 
 	@Test

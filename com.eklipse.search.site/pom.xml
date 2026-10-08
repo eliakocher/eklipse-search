@@ -7,10 +7,41 @@
 	<parent>
 		<groupId>com.eklipse</groupId>
 		<artifactId>search-parent</artifactId>
-		<version>1.0.4-SNAPSHOT</version>
+		<version>1.0.5-SNAPSHOT</version>
 	</parent>
 
 	<!-- Produces target/repository (a p2 update site) and a zipped copy of it -->
 	<artifactId>com.eklipse.search.site</artifactId>
 	<packaging>eclipse-repository</packaging>
+
+	<profiles>
+		<!-- Used by the update site workflow: PGP-signs the plugin and the feature, so Eclipse asks once whether to trust
+			the signer instead of warning about unsigned content on every install. Needs the armored secret key in a file,
+			passed with -Dtycho.pgp.signer.bc.secretKeys=<file>, and its passphrase in the environment variable
+			MAVEN_GPG_PASSPHRASE. -->
+		<profile>
+			<id>sign</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.eclipse.tycho</groupId>
+						<artifactId>tycho-gpg-plugin</artifactId>
+						<version>${tycho.version}</version>
+						<executions>
+							<execution>
+								<id>pgp-sign</id>
+								<goals>
+									<goal>sign-p2-artifacts</goal>
+								</goals>
+								<configuration>
+									<!-- Bouncy Castle, no gpg installation needed -->
+									<signer>bc</signer>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

@@ -2,7 +2,7 @@
 <feature
       id="com.eklipse.search.feature"
       label="Eklipse Search"
-      version="1.0.4.qualifier"
+      version="1.0.5.qualifier"
       provider-name="Eklipse">
 
    <description>

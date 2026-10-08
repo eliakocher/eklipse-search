@@ -3,6 +3,9 @@
 #   git tag 1.0.3 && git push origin 1.0.3
 # Each run replaces the site with the build of that tag. Tags may deploy to Pages thanks to the tag rule *.*.* under
 # Settings > Environments > github-pages (only main may by default).
+# The plugin and the feature are PGP-signed with the key in the repository secrets MAVEN_GPG_KEY (armored secret key,
+# gpg --armor --export-secret-keys <fingerprint>) and MAVEN_GPG_PASSPHRASE. Keep using the same key: Eclipse remembers
+# the trusted signer, a new key makes everyone confirm again.
 name: Update site
 
 on:
@@ -36,8 +39,20 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Build and test
-        run: ./mvnw -B verify
+      - name: Prepare the signing key
+        env:
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$MAVEN_GPG_KEY" ] || [ -z "$MAVEN_GPG_PASSPHRASE" ]; then
+            echo "::error::The repository secrets MAVEN_GPG_KEY and MAVEN_GPG_PASSPHRASE are needed to sign the update site"
+            exit 1
+          fi
+          printf '%s\n' "$MAVEN_GPG_KEY" > "$RUNNER_TEMP/signing-key.asc"
+      - name: Build, test and sign
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: ./mvnw -B verify -Psign -Dtycho.pgp.signer.bc.secretKeys="$RUNNER_TEMP/signing-key.asc"
       - name: Add the landing page
         run: cp com.eklipse.search.site/index.html com.eklipse.search.site/target/repository/
       - uses: actions/upload-pages-artifact@v3
