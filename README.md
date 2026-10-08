@@ -184,18 +184,6 @@ Needs Java 21 to run the build, Maven is downloaded by the wrapper. On Windows u
 | `com.eklipse.search.uitests` | UI and performance tests (profile `ui-tests`) |
 | `com.eklipse.search.feature` / `.site` | feature and p2 update site |
 
-### Publish the update site
-
-The workflow `.github/workflows/update-site.yml` builds and tests the update site on GitHub Actions and publishes it
-on GitHub Pages, replacing the previous version:
-
-- **Once:** *Settings > Pages > Build and deployment > Source: GitHub Actions*.
-- **Release:** push a version tag, e.g. `git tag v1.0.2 && git push origin v1.0.2`, or start it by hand under
-  *Actions > Update site > Run workflow*.
-
-Each build gets the build time as qualifier (`1.0.2.202610081530`), so Eclipse offers it as an update even while the
-version stays the same.
-
 ## Known limitations
 
 - Only tested on macOS so far. On Windows and Linux, `Alt+R` / `Alt+W` / `Alt+P` might open Eclipse's *Run* /
