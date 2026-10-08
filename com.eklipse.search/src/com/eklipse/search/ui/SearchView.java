@@ -60,7 +60,6 @@ import org.eclipse.jface.util.Util;
 import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.StructuredSelection;
-import org.eclipse.jface.viewers.TreeViewer;
 import org.eclipse.jface.viewers.TreeViewerColumn;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.SashForm;
@@ -188,7 +187,7 @@ public class SearchView extends ViewPart {
 	private ProgressBar progressBar;
 	private Label durationLabel;
 	private SashForm resultSash;
-	private TreeViewer viewer;
+	private ResultViewer viewer;
 	private PreviewPane preview;
 	private EditorMatchMarks editorMarks;
 
@@ -255,6 +254,8 @@ public class SearchView extends ViewPart {
 		volatile boolean done;
 		/** Whether the tree shows the results of this search, until then it shows those of the previous one. */
 		boolean shown;
+		/** The matches in the files expanded so far, at most {@link #AUTO_EXPAND_LIMIT}. */
+		int expandedMatches;
 		Job job;
 
 		SearchSession(SearchQuery query, Pattern pattern, WorkspaceSearchScope scope, boolean narrowed) {
@@ -453,7 +454,7 @@ public class SearchView extends ViewPart {
 		resultSash = new SashForm(parent, SWT.VERTICAL | SWT.SMOOTH);
 		GridDataFactory.fillDefaults().grab(true, true).applyTo(resultSash);
 		// no horizontal scrolling like in VS Code, long lines are shortened around the match and shown in the tooltip
-		viewer = new TreeViewer(resultSash, SWT.MULTI | SWT.V_SCROLL | SWT.FULL_SELECTION);
+		viewer = new ResultViewer(resultSash, SWT.MULTI | SWT.V_SCROLL | SWT.FULL_SELECTION);
 		Tree tree = viewer.getTree();
 		viewer.setUseHashlookup(true);
 		viewer.setContentProvider(new ResultContentProvider());
@@ -1041,11 +1042,16 @@ public class SearchView extends ViewPart {
 			}
 			if (!newFiles.isEmpty()) {
 				viewer.add(result, newFiles.toArray());
-				if (result.getMatchCount() <= AUTO_EXPAND_LIMIT) {
-					for (FileMatch fileMatch : newFiles) {
-						viewer.setExpandedState(fileMatch, true);
+				// decided per file, a fast search delivering more than the limit in one batch still gets the first
+				// files expanded
+				List<FileMatch> expand = new ArrayList<>();
+				for (FileMatch fileMatch : newFiles) {
+					if (s.expandedMatches + fileMatch.getMatchCount() <= AUTO_EXPAND_LIMIT) {
+						s.expandedMatches += fileMatch.getMatchCount();
+						expand.add(fileMatch);
 					}
 				}
+				viewer.expandFiles(expand);
 			}
 			for (Map.Entry<FileMatch, List<LineMatch>> entry : newMatches.entrySet()) {
 				viewer.add(entry.getKey(), entry.getValue().toArray());
@@ -1299,6 +1305,7 @@ public class SearchView extends ViewPart {
 		Tree tree = viewer.getTree();
 		tree.setRedraw(false);
 		try {
+			List<FileMatch> expand = new ArrayList<>();
 			for (IFile file : files) {
 				FileMatch old = result.get(file);
 				boolean expanded = old == null || viewer.getExpandedState(old);
@@ -1316,9 +1323,10 @@ public class SearchView extends ViewPart {
 				}
 				viewer.add(result, fileMatch);
 				if (expanded) {
-					viewer.setExpandedState(fileMatch, true);
+					expand.add(fileMatch);
 				}
 			}
+			viewer.expandFiles(expand);
 		} finally {
 			tree.setRedraw(true);
 			fitColumn();
@@ -1694,7 +1702,7 @@ public class SearchView extends ViewPart {
 		return replaceToggleItem;
 	}
 
-	TreeViewer getViewer() {
+	ResultViewer getViewer() {
 		return viewer;
 	}
 

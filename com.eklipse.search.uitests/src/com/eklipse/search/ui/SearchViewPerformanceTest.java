@@ -34,6 +34,8 @@ class SearchViewPerformanceTest {
 	private static final int LINES = 40;
 	/** macOS shows the spinning wheel after about 2 s, anything above a few frames feels sluggish. */
 	private static final long MAX_ALLOWED_STALL_MS = 250;
+	/** Expand All is a single click, a moment is fine (about 350 ms on an M5 Pro), the spinning wheel is not. */
+	private static final long MAX_ALLOWED_EXPAND_ALL_MS = 1000;
 
 	private IProject project;
 	private IWorkbenchPage page;
@@ -97,6 +99,22 @@ class SearchViewPerformanceTest {
 		System.out.println("PERF typing '" + query + "': " + view.getSummary() + ", total " + totalMs
 				+ " ms, longest UI freeze " + stallMs + " ms");
 		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	@Test
+	void expandingAllOfManyResultsKeepsTheUiResponsive() {
+		view.activateSearch("sendSms");
+		waitUntil(() -> !view.isSearching(), 60_000);
+
+		startMeasuring();
+		long start = System.nanoTime();
+		view.getViewer().expandAll();
+		drain(200);
+		measuring = false;
+		long stallMs = maxStallNanos / 1_000_000;
+		System.out.println("PERF expand all of " + view.getSummary() + ": total "
+				+ (System.nanoTime() - start) / 1_000_000 + " ms, longest UI freeze " + stallMs + " ms");
+		assertTrue(stallMs < MAX_ALLOWED_EXPAND_ALL_MS, "UI was blocked for " + stallMs + " ms");
 	}
 
 	@Test
