@@ -3,7 +3,7 @@
 A VS Code style search & replace for Eclipse, as a regular docked view (on the right by default, drag it wherever you
 like): search as you type across the workspace, results grouped by file, replace with a live preview.
 
-<img src="docs/sidebar-search.png" width="300" alt="Search results"> <img src="docs/sidebar-replace.png" width="300" alt="Replace preview">
+<img src="docs/sidebar-search.png" width="360" alt="Search results">
 
 ## Install
 
