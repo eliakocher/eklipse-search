@@ -48,10 +48,6 @@ final class FieldHistory {
 		return text;
 	}
 
-	ToolItem getDropDown() {
-		return dropDown;
-	}
-
 	/**
 	 * Adds the value of the field, as the newest one.
 	 */

@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: Eklipse Search UI Tests
 Bundle-SymbolicName: com.eklipse.search.uitests
-Bundle-Version: 1.0.1.qualifier
+Bundle-Version: 1.0.2.qualifier
 Bundle-Vendor: Eklipse
 Fragment-Host: com.eklipse.search
 Bundle-RequiredExecutionEnvironment: JavaSE-17

@@ -144,7 +144,7 @@ class SearchViewUiTest {
 		view = (SearchView) page.showView(SearchView.ID);
 		// a view reopened in the same session restores its previous state
 		view.getCaseItem().setSelection(false);
-		view.getRegexItem().setSelection(false);
+		view.getRegexAction().setChecked(false);
 		view.getReplaceText().setText("");
 		view.getIncludeText().setText("");
 		view.getSearchText().setText("");
@@ -502,7 +502,7 @@ class SearchViewUiTest {
 
 	@Test
 	void invalidRegexShowsAnError() {
-		toggle(view.getRegexItem());
+		view.getRegexAction().setChecked(true);
 		view.getSearchText().setText("sms(");
 		waitForSearch();
 		assertTrue(view.getSummary().startsWith("Invalid regular expression: Unclosed group"), view.getSummary());

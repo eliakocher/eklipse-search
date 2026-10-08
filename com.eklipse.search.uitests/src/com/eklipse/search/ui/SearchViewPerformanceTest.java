@@ -67,7 +67,7 @@ class SearchViewPerformanceTest {
 		page = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage();
 		view = (SearchView) page.showView(SearchView.ID);
 		view.getCaseItem().setSelection(false);
-		view.getRegexItem().setSelection(false);
+		view.getRegexAction().setChecked(false);
 		view.getReplaceText().setText("");
 		view.getIncludeText().setText("");
 		view.getSearchText().setText("");

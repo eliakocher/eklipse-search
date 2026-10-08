@@ -10,22 +10,10 @@ like): search as you type across the workspace, results grouped by file, replace
 Works with Eclipse 2024-03 or newer on macOS, Windows and Linux. Tested so far on macOS only, with Eclipse 2024-03,
 2025-12 and 2026-09.
 
-### 1. Get the update site
-
-You need the file `com.eklipse.search.site-1.0.1-SNAPSHOT.zip`. Either ask a colleague who has it, or build it
-yourself (needs a JDK 21, Maven is downloaded automatically):
-
-| | |
-|---|---|
-| macOS / Linux | `./mvnw verify -DskipTests` |
-| Windows | `mvnw.cmd verify -DskipTests` |
-
-The zip ends up in `com.eklipse.search.site/target/`.
-
-### 2. Install it in Eclipse
+### 1. Install it from the update site
 
 1. *Help > Install New Software...*
-2. *Add... > Archive...*, select the zip, name it e.g. `Eklipse Search`, *Add*.
+2. Paste `https://eliakocher.github.io/eklipse-search/` into *Work with* and press `Enter`.
 3. Check *Eklipse Tools > Eklipse Search*. Unchecking *Contact all update sites during install to find required
    software* makes the install faster.
 4. *Next*, *Next*, *Finish*.
@@ -33,7 +21,7 @@ The zip ends up in `com.eklipse.search.site/target/`.
    *Install anyway* (the wording differs a bit between Eclipse versions).
 6. Restart Eclipse when asked.
 
-### 3. Open it, or pick your own shortcut
+### 2. Open it, or pick your own shortcut
 
 Open the view with `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS) or *Search > Eklipse Search...*.
 
@@ -47,19 +35,24 @@ If the shortcut doesn't work, or you want a different one:
 
 See [Usage](#usage) for everything else.
 
-**Update:** install a newer zip the same way, Eclipse shows it as an update.
+**Update:** *Help > Check for Updates* finds new versions on the update site.
 
 **Uninstall:** *Help > About Eclipse IDE* (*Eclipse > About Eclipse IDE* on macOS) *> Installation Details*, select
 *Eklipse Search*, *Uninstall...*.
 
 ### Other ways to install
 
+- **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.2-SNAPSHOT.zip` into
+  `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
+  with step 3 above. A newer zip installed the same way shows up as an update.
+
 - **Command line**: with Eclipse closed, the p2 director does the same as *Install New Software*:
 
   ```sh
   # macOS
   /Applications/Eclipse.app/Contents/MacOS/eclipse -nosplash -application org.eclipse.equinox.p2.director \
-      -repository "jar:file:/path/to/com.eklipse.search.site-1.0.1-SNAPSHOT.zip!/" \
+      -repository https://eliakocher.github.io/eklipse-search/ \
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
 
   # Linux: same arguments, started with <eclipse folder>/eclipse
@@ -68,11 +61,14 @@ See [Usage](#usage) for everything else.
   ```bat
   :: Windows: eclipsec.exe prints the output to the console
   C:\path\to\eclipse\eclipsec.exe -nosplash -application org.eclipse.equinox.p2.director ^
-      -repository "jar:file:/C:/path/to/com.eklipse.search.site-1.0.1-SNAPSHOT.zip!/" ^
+      -repository https://eliakocher.github.io/eklipse-search/ ^
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.1-SNAPSHOT.jar` into the `dropins`
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.2-SNAPSHOT.zip!/"` instead (Windows:
+  `jar:file:/C:/path/to/...zip!/`).
+
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.2-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -91,7 +87,7 @@ See [Usage](#usage) for everything else.
 - Search as you type across all open projects, results stream in while the search runs, with a progress bar when it
   takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
   searches the files that already had matches, and the previous results stay until the new ones arrive
-- **Aa** match case, **ab** whole word, **.\*** regular expression
+- **Aa** match case, **ab** whole word next to the search field, *Use Regular Expression* in the view's ⋮ menu
 - Replace field (toggle with the chevron) with **AB** preserve case and **Replace All**
   - matches are previewed as ~~old~~new in the results
   - regex replacements support `$1`, `${name}`, `$0`/`$&`, `\n`, `\t`
@@ -99,13 +95,13 @@ See [Usage](#usage) for everything else.
   - unsaved editors are updated in place and stay unsaved, everything can be undone (Edit > Undo while the view is active)
   - files changed since the search are skipped instead of being replaced at the wrong position
 - *Include* (prefilled with `*.java`) / *Exclude* (prefilled with `testbundle.*, **/node_modules`): VS Code
-  globs (see below), always visible below the search field, with the funnel toggle next to *Exclude* to skip derived
-  resources (on by default, Maven `target/` folders are derived). The view remembers what you enter there, and the
-  search options, across restarts. The arrow next to each field (or `↓` in it) lists the last 15 values you used
-  there, a value counts once you leave the field or press `Enter`
+  globs (see below), always visible below the search field. *Skip Derived Resources* in the view's ⋮ menu leaves out
+  the build output Eclipse marks as derived, e.g. Maven `target/` folders (on by default). The view remembers what
+  you enter there, and the search options, across restarts. The arrow next to each field (or `↓` in it) lists the last
+  15 values you used there, a value counts once you leave the field or press `Enter`
 - Preview like Quick Search: a click on a result shows its file below the results, with the line of the match
   highlighted and all matches marked; a double-click or `Enter` opens it. Switch it off with *Show Preview* in the
-  view's toolbar (or ⋮ menu), then a click opens the editor right away, like in VS Code
+  view's ⋮ menu, then a click opens the editor right away, like in VS Code
 - Syntax highlighting in the preview, with what the installed Eclipse has: Java files in the colors of the Java
   editor (JDT), including the semantic highlighting of fields, static members, local variables and so on, which
   follows a moment later once the file is parsed in the background; other languages with the TextMate grammars of
@@ -137,7 +133,7 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 |---|---|
 | Open the view | `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS), *Search > Eklipse Search...*, or *Window > Show View > General > Search* (the one with the blue magnifier, Eclipse's own search results view has the same name) |
 | Prefill | select text in an editor before opening the view |
-| Toggle match case / whole word / regex / preserve case / skip derived resources | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` / `Alt+D` (`⌥` on macOS), or click the buttons |
+| Toggle match case / whole word / regex / preserve case / skip derived resources | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` / `Alt+D` (`⌥` on macOS), or click the buttons (regex and derived resources: the view's ⋮ menu) |
 | Jump into the results | `↓` in the search field |
 | Reuse an include/exclude pattern | the arrow next to the field, or `↓` in it |
 | Preview a match | click it: the file shows below the results. With *Show Preview* off, it opens in the editor without leaving the view |
@@ -146,13 +142,13 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 | Replace all | *Replace All* or `Ctrl+Enter` / `Cmd+Enter` in the replace field |
 | Replace some | select matches or files, context menu *Replace* (while the replace field is shown) |
 | Copy | `Ctrl+C` / `Cmd+C` copies the selected results with line numbers (in the preview: the selected text), context menu *Copy Path* copies file paths |
-| Expand / collapse all | the button right of the result count (or the view's toolbar) |
-| Search again, clear, show preview | the view's toolbar |
+| Search again, clear (also empties the replace field), expand / collapse all | the view's toolbar |
+| Regular expression, skip derived resources, show preview | the view's ⋮ menu |
 
 The view opens on the right, stacked with the Outline, in a fresh perspective (or after *Window > Perspective > Reset
 Perspective*). Otherwise drag its tab to the side you like once, Eclipse remembers the position.
 
-To use another shortcut, see [Open it, or pick your own shortcut](#3-open-it-or-pick-your-own-shortcut).
+To use another shortcut, see [Open it, or pick your own shortcut](#2-open-it-or-pick-your-own-shortcut).
 
 ### Include / exclude globs
 
@@ -188,10 +184,22 @@ Needs Java 21 to run the build, Maven is downloaded by the wrapper. On Windows u
 | `com.eklipse.search.uitests` | UI and performance tests (profile `ui-tests`) |
 | `com.eklipse.search.feature` / `.site` | feature and p2 update site |
 
+### Publish the update site
+
+The workflow `.github/workflows/update-site.yml` builds and tests the update site on GitHub Actions and publishes it
+on GitHub Pages, replacing the previous version:
+
+- **Once:** *Settings > Pages > Build and deployment > Source: GitHub Actions*.
+- **Release:** push a version tag, e.g. `git tag v1.0.2 && git push origin v1.0.2`, or start it by hand under
+  *Actions > Update site > Run workflow*.
+
+Each build gets the build time as qualifier (`1.0.2.202610081530`), so Eclipse offers it as an update even while the
+version stays the same.
+
 ## Known limitations
 
 - Only tested on macOS so far. On Windows and Linux, `Alt+R` / `Alt+W` / `Alt+P` might open Eclipse's *Run* /
-  *Window* / *Project* menus instead of toggling the options; the buttons always work. Feedback welcome.
+  *Window* / *Project* menus instead of toggling the options; the buttons and the ⋮ menu always work. Feedback welcome.
 - Results refresh when a file is saved, not while typing in an editor.
 - At most 20 000 results are collected, like VS Code; narrow the search if the limit is hit.
 - Files without an Eclipse editor (e.g. `.md` in a bare Eclipse) are opened in the system's default application,

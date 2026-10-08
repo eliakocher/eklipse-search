@@ -179,11 +179,8 @@ public class SearchView extends ViewPart {
 	private ToolItem replaceToggleItem;
 	private ToolItem caseItem;
 	private ToolItem wordItem;
-	private ToolItem regexItem;
 	private ToolItem preserveCaseItem;
 	private ToolItem replaceAllItem;
-	private ToolItem derivedItem;
-	private ToolItem expandToggleItem;
 	private Composite inputFields;
 	private ToolBar optionsBar;
 	private ToolBar replaceBar;
@@ -200,6 +197,8 @@ public class SearchView extends ViewPart {
 	private Action expandAllAction;
 	private Action collapseAllAction;
 	private Action previewAction;
+	private Action regexAction;
+	private Action derivedAction;
 	private Action openAction;
 	private Action replaceSelectionAction;
 	private Action dismissAction;
@@ -332,7 +331,6 @@ public class SearchView extends ViewPart {
 		optionsBar = createRowToolBar(inputFields);
 		caseItem = createToggle(optionsBar, overlayIcon("case_sensitive"), "Aa", "Match Case", 'C');
 		wordItem = createToggle(optionsBar, overlayIcon("whole_word"), "ab", "Match Whole Word", 'W');
-		regexItem = createToggle(optionsBar, overlayIcon("regex"), ".*", "Use Regular Expression", 'R');
 
 		replaceText = createField(inputFields, "Replace");
 		replaceBar = createRowToolBar(inputFields);
@@ -416,8 +414,6 @@ public class SearchView extends ViewPart {
 		includeText = includeHistory.getText();
 		excludeHistory = createFilterField(area, "Exclude:", "e.g. **/node_modules");
 		excludeText = excludeHistory.getText();
-		derivedItem = createToggle(excludeHistory.getDropDown().getParent(), icons.funnel(), "D",
-				"Skip Derived Resources, the build output Eclipse marks as derived, e.g. Maven target/ folders", 'D');
 	}
 
 	private FieldHistory createFilterField(Composite parent, String label, String hint) {
@@ -438,9 +434,9 @@ public class SearchView extends ViewPart {
 	private void createSummary(Composite parent) {
 		Composite row = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
-		GridLayoutFactory.fillDefaults().numColumns(4).spacing(6, 0).applyTo(row);
+		GridLayoutFactory.fillDefaults().numColumns(3).spacing(6, 0).applyTo(row);
 		summaryLabel = new Label(row, SWT.WRAP);
-		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(summaryLabel);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(summaryLabel);
 		// the progress while searching, then how long it took, in one place on the right
 		progressBar = new ProgressBar(row, SWT.HORIZONTAL);
 		progressBar.setMaximum(PROGRESS_STEPS);
@@ -449,12 +445,7 @@ public class SearchView extends ViewPart {
 		progressBar.setVisible(false);
 		durationLabel = new Label(row, SWT.NONE);
 		durationLabel.setForeground(JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR));
-		GridDataFactory.fillDefaults().align(SWT.END, SWT.CENTER).applyTo(durationLabel);
-		// one button like VS Code: collapses all while any file is expanded, expands all otherwise
-		ToolBar expandBar = new ToolBar(row, SWT.FLAT);
-		GridDataFactory.fillDefaults().align(SWT.END, SWT.CENTER).applyTo(expandBar);
-		expandToggleItem = new ToolItem(expandBar, SWT.PUSH);
-		updateExpandToggle();
+		GridDataFactory.fillDefaults().align(SWT.END, SWT.BEGINNING).applyTo(durationLabel);
 	}
 
 	private void createViewer(Composite parent) {
@@ -475,14 +466,10 @@ public class SearchView extends ViewPart {
 		tree.addListener(SWT.FocusIn, e -> tree.redraw());
 		tree.addListener(SWT.FocusOut, e -> tree.redraw());
 		tree.addListener(SWT.Resize, e -> fitColumn());
-		// expanding can show the vertical scroll bar, which narrows the tree without a resize event; both events come
-		// before the item changes
-		Listener expansion = e -> display.asyncExec(() -> {
-			fitColumn();
-			updateExpandToggle();
-		});
-		tree.addListener(SWT.Expand, expansion);
-		tree.addListener(SWT.Collapse, expansion);
+		// expanding can show the vertical scroll bar, which narrows the tree without a resize event
+		Listener refit = e -> display.asyncExec(this::fitColumn);
+		tree.addListener(SWT.Expand, refit);
+		tree.addListener(SWT.Collapse, refit);
 		viewer.setComparator(new ResultComparator());
 		ColumnViewerToolTipSupport.enableFor(viewer);
 		viewer.setInput(result);
@@ -566,6 +553,9 @@ public class SearchView extends ViewPart {
 		expandAllAction = createAction("Expand All", searchImage("expandall.png"), () -> viewer.expandAll());
 		collapseAllAction = createAction("Collapse All",
 				images.getImageDescriptor(ISharedImages.IMG_ELCL_COLLAPSEALL), () -> viewer.collapseAll());
+		regexAction = createOptionAction("Use Regular Expression", 'R', overlayIcon("regex"));
+		// the build output Eclipse marks as derived, e.g. Maven target/ folders
+		derivedAction = createOptionAction("Skip Derived Resources", 'D', icons.funnel());
 		previewAction = new Action("Show Preview", IAction.AS_CHECK_BOX) {
 			@Override
 			public void run() {
@@ -616,6 +606,22 @@ public class SearchView extends ViewPart {
 		return ResourceLocator.imageDescriptorFromBundle("org.eclipse.search", "icons/full/elcl16/" + name).orElse(null);
 	}
 
+	/**
+	 * @return a search option for the view menu, toggled with Alt and {@code key} in the text fields too
+	 */
+	private Action createOptionAction(String text, char key, ImageDescriptor image) {
+		Action action = new Action(text + " (" + (Util.isMac() ? "⌥" : "Alt+") + key + ")", IAction.AS_CHECK_BOX) {
+			@Override
+			public void run() {
+				scheduleSearch(0);
+			}
+		};
+		if (image != null) {
+			action.setImageDescriptor(image);
+		}
+		return action;
+	}
+
 	private static Action createAction(String text, ImageDescriptor image, Runnable runnable) {
 		Action action = new Action(text) {
 			@Override
@@ -638,9 +644,11 @@ public class SearchView extends ViewPart {
 		toolBar.add(new Separator());
 		toolBar.add(expandAllAction);
 		toolBar.add(collapseAllAction);
-		toolBar.add(new Separator());
-		toolBar.add(previewAction);
-		bars.getMenuManager().add(previewAction);
+		IMenuManager menu = bars.getMenuManager();
+		menu.add(regexAction);
+		menu.add(derivedAction);
+		menu.add(new Separator());
+		menu.add(previewAction);
 
 		// Copy, Delete and Select All work on the text fields while they have focus, on the results otherwise
 		TextActionHandler textActionHandler = new TextActionHandler(bars);
@@ -677,21 +685,11 @@ public class SearchView extends ViewPart {
 
 	private void hookListeners() {
 		replaceToggleItem.addListener(SWT.Selection, e -> setReplaceVisible(!isReplaceVisible()));
-		for (ToolItem item : new ToolItem[] { caseItem, wordItem, regexItem }) {
+		for (ToolItem item : new ToolItem[] { caseItem, wordItem }) {
 			item.addListener(SWT.Selection, e -> scheduleSearch(0));
 		}
 		preserveCaseItem.addListener(SWT.Selection, e -> scheduleLabelRefresh());
 		replaceAllItem.addListener(SWT.Selection, e -> replaceAll(true));
-		derivedItem.addListener(SWT.Selection, e -> scheduleSearch(0));
-		expandToggleItem.addListener(SWT.Selection, e -> {
-			if (anyExpanded(viewer.getTree())) {
-				viewer.collapseAll();
-			} else {
-				viewer.expandAll();
-			}
-			fitColumn();
-			updateExpandToggle();
-		});
 
 		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
 		searchText.addListener(SWT.DefaultSelection, e -> scheduleSearch(0));
@@ -744,19 +742,29 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Alt+C / Alt+W / Alt+R / Alt+P toggle the options like in VS Code (Option on macOS, where Cmd+Option+W is
+	 * Alt+C / Alt+W / Alt+R / Alt+P / Alt+D toggle the options like in VS Code (Option on macOS, where Cmd+Option+W is
 	 * already bound by Eclipse).
 	 */
 	private void handleOptionKey(Event e) {
 		if ((e.stateMask & SWT.MODIFIER_MASK) != SWT.ALT) {
 			return;
 		}
-		ToolItem item = switch (Character.toLowerCase((char) e.keyCode)) {
+		char key = Character.toLowerCase((char) e.keyCode);
+		Action action = switch (key) {
+			case 'r' -> regexAction;
+			case 'd' -> derivedAction;
+			default -> null;
+		};
+		if (action != null) {
+			e.doit = false;
+			action.setChecked(!action.isChecked());
+			action.run();
+			return;
+		}
+		ToolItem item = switch (key) {
 			case 'c' -> caseItem;
 			case 'w' -> wordItem;
-			case 'r' -> regexItem;
 			case 'p' -> preserveCaseItem;
-			case 'd' -> derivedItem;
 			default -> null;
 		};
 		if (item != null) {
@@ -839,7 +847,7 @@ public class SearchView extends ViewPart {
 
 	private SearchQuery currentQuery() {
 		return new SearchQuery(searchText.getText(), caseItem.getSelection(), wordItem.getSelection(),
-				regexItem.getSelection(), includeText.getText(), excludeText.getText(), derivedItem.getSelection());
+				regexAction.isChecked(), includeText.getText(), excludeText.getText(), derivedAction.isChecked());
 	}
 
 	private void scheduleSearch(int delayMs) {
@@ -1052,7 +1060,6 @@ public class SearchView extends ViewPart {
 	}
 
 	private void updateSummary() {
-		updateExpandToggle();
 		SearchSession s = session;
 		if (s == null) {
 			return;
@@ -1121,28 +1128,9 @@ public class SearchView extends ViewPart {
 		return millis < 1000 ? millis + " ms" : String.format("%.1f s", millis / 1000.0);
 	}
 
-	private void updateExpandToggle() {
-		if (expandToggleItem.isDisposed()) {
-			return;
-		}
-		Tree tree = viewer != null ? viewer.getTree() : null;
-		boolean collapse = tree != null && anyExpanded(tree);
-		expandToggleItem.setImage(resources.create(collapse ? icons.collapseAll() : icons.expandAll()));
-		expandToggleItem.setToolTipText(collapse ? "Collapse All" : "Expand All");
-		expandToggleItem.setEnabled(tree != null && tree.getItemCount() > 0);
-	}
-
-	private static boolean anyExpanded(Tree tree) {
-		for (TreeItem item : tree.getItems()) {
-			if (item.getExpanded()) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	private void clear() {
 		searchText.setText("");
+		replaceText.setText("");
 		startSearch();
 		searchText.setFocus();
 	}
@@ -1656,7 +1644,7 @@ public class SearchView extends ViewPart {
 	 */
 	public void activateSearch(String initialText) {
 		if (initialText != null && !initialText.isEmpty()) {
-			searchText.setText(regexItem.getSelection() ? SearchPatterns.escapeRegex(initialText) : initialText);
+			searchText.setText(regexAction.isChecked() ? SearchPatterns.escapeRegex(initialText) : initialText);
 			scheduleSearch(0);
 		}
 		searchText.setFocus();
@@ -1698,8 +1686,8 @@ public class SearchView extends ViewPart {
 		return caseItem;
 	}
 
-	ToolItem getRegexItem() {
-		return regexItem;
+	Action getRegexAction() {
+		return regexAction;
 	}
 
 	ToolItem getReplaceToggleItem() {
@@ -1757,9 +1745,9 @@ public class SearchView extends ViewPart {
 		excludeHistory.restore(string(m, KEY_EXCLUDE_HISTORY, null));
 		caseItem.setSelection(bool(m, KEY_CASE, false));
 		wordItem.setSelection(bool(m, KEY_WORD, false));
-		regexItem.setSelection(bool(m, KEY_REGEX, false));
+		regexAction.setChecked(bool(m, KEY_REGEX, false));
 		preserveCaseItem.setSelection(bool(m, KEY_PRESERVE_CASE, false));
-		derivedItem.setSelection(bool(m, KEY_DERIVED, true));
+		derivedAction.setChecked(bool(m, KEY_DERIVED, true));
 		boolean replaceVisible = bool(m, KEY_REPLACE_VISIBLE, false);
 		setVisible(replaceVisible, replaceText, replaceBar);
 		updateReplaceToggle(replaceVisible);
@@ -1798,9 +1786,9 @@ public class SearchView extends ViewPart {
 		m.putString(KEY_EXCLUDE_HISTORY, excludeHistory.save());
 		m.putBoolean(KEY_CASE, caseItem.getSelection());
 		m.putBoolean(KEY_WORD, wordItem.getSelection());
-		m.putBoolean(KEY_REGEX, regexItem.getSelection());
+		m.putBoolean(KEY_REGEX, regexAction.isChecked());
 		m.putBoolean(KEY_PRESERVE_CASE, preserveCaseItem.getSelection());
-		m.putBoolean(KEY_DERIVED, derivedItem.getSelection());
+		m.putBoolean(KEY_DERIVED, derivedAction.isChecked());
 		m.putBoolean(KEY_REPLACE_VISIBLE, isReplaceVisible());
 		m.putBoolean(KEY_PREVIEW, isPreviewVisible());
 		int[] weights = resultSash.getWeights();

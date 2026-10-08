@@ -7,7 +7,7 @@
 	<parent>
 		<groupId>com.eklipse</groupId>
 		<artifactId>search-parent</artifactId>
-		<version>1.0.1-SNAPSHOT</version>
+		<version>1.0.2-SNAPSHOT</version>
 	</parent>
 
 	<!-- Opens a real workbench window: run with ./mvnw verify -Pui-tests -->

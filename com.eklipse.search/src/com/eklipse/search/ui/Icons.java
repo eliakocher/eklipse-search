@@ -20,17 +20,12 @@ final class Icons {
 	/** Pixels whose channels differ less than this count as gray, colored parts of an icon keep their color. */
 	private static final int GRAY_TOLERANCE = 24;
 	private static final int SUPERSAMPLING = 4;
-	private static final double[] FRONT_BOX = { 2.5, 5.5, 10.5, 5.5, 10.5, 13.5, 2.5, 13.5, 2.5, 5.5 };
-	private static final double[] BACK_BOX = { 5.5, 5.5, 5.5, 2.5, 13.5, 2.5, 13.5, 10.5, 10.5, 10.5 };
-	private static final double[] MINUS = { 4.5, 9.5, 8.5, 9.5 };
 
 	private final boolean dark;
 	private final int color;
 	private final ImageDescriptor chevronRight;
 	private final ImageDescriptor chevronDown;
 	private final ImageDescriptor funnel;
-	private final ImageDescriptor expandAll;
-	private final ImageDescriptor collapseAll;
 
 	/**
 	 * @param background the background the icons are shown on
@@ -41,8 +36,6 @@ final class Icons {
 		chevronRight = draw(0.8, new double[] { 6, 4, 10, 8, 6, 12 });
 		chevronDown = draw(0.8, new double[] { 4, 6, 8, 10, 12, 6 });
 		funnel = draw(0.65, new double[] { 2, 3.5, 14, 3.5, 10, 8.5, 10, 13.5, 6, 12, 6, 8.5, 2, 3.5 });
-		expandAll = draw(0.6, FRONT_BOX, BACK_BOX, MINUS, new double[] { 6.5, 7.5, 6.5, 11.5 });
-		collapseAll = draw(0.6, FRONT_BOX, BACK_BOX, MINUS);
 	}
 
 	/**
@@ -58,20 +51,6 @@ final class Icons {
 	 */
 	ImageDescriptor funnel() {
 		return funnel;
-	}
-
-	/**
-	 * @return two stacked boxes with a plus
-	 */
-	ImageDescriptor expandAll() {
-		return expandAll;
-	}
-
-	/**
-	 * @return two stacked boxes with a minus
-	 */
-	ImageDescriptor collapseAll() {
-		return collapseAll;
 	}
 
 	/**
