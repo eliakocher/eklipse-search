@@ -19,7 +19,7 @@ import org.eclipse.swt.widgets.ToolItem;
  */
 final class FieldHistory {
 
-	private static final int MAX_ENTRIES = 15;
+	static final int MAX_ENTRIES = 15;
 	private static final String SEPARATOR = "\n";
 
 	private final Text text;
@@ -46,6 +46,10 @@ final class FieldHistory {
 
 	Text getText() {
 		return text;
+	}
+
+	ToolItem getDropDown() {
+		return dropDown;
 	}
 
 	/**

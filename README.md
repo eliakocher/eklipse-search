@@ -98,8 +98,8 @@ See [Usage](#usage) for everything else.
   - replace one match, a file or a selection from the context menu
   - unsaved editors are updated in place and stay unsaved, everything can be undone (Edit > Undo while the view is active)
   - files changed since the search are skipped instead of being replaced at the wrong position
-- *files to include* (prefilled with `*.java`) / *files to exclude* (prefilled with `testbundle.*, **/node_modules`),
-  VS Code globs (see below), always visible, side by side, with the funnel toggle next to them to skip derived
+- *Include* (prefilled with `*.java`) / *Exclude* (prefilled with `testbundle.*, **/node_modules`): VS Code
+  globs (see below), always visible below the search field, with the funnel toggle next to *Exclude* to skip derived
   resources (on by default, Maven `target/` folders are derived). The view remembers what you enter there, and the
   search options, across restarts. The arrow next to each field (or `↓` in it) lists the last 15 values you used
   there, a value counts once you leave the field or press `Enter`
@@ -119,8 +119,10 @@ See [Usage](#usage) for everything else.
 - Nested Maven modules imported as separate projects are reported once
 - Made for a tall, narrow side bar: compact option buttons (with the icons of Eclipse's own find/replace overlay where the installed
   Eclipse ships them, e.g. 2026-09; text labels on older ones like 2024-03), match
-  counts next to file names, previews shortened so the match stays visible, no sideways scrolling (the full line is in
-  the tooltip); below ~260px the option buttons move under their field and include/exclude stack
+  counts next to file names, folders shortened in the middle (`project/…/server/sync`) and lines around the match, so
+  the match stays visible, no sideways scrolling (the full path or line is in the tooltip); below ~260px the option
+  buttons move under their field. The selected result is gray instead of the accent color, so its match stays
+  highlighted
 - Works in light and dark theme
 
 Searches run on the platform's text search engine (the one behind Search > File...), which also searches the content
@@ -144,7 +146,8 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 | Replace all | *Replace All* or `Ctrl+Enter` / `Cmd+Enter` in the replace field |
 | Replace some | select matches or files, context menu *Replace* (while the replace field is shown) |
 | Copy | `Ctrl+C` / `Cmd+C` copies the selected results with line numbers (in the preview: the selected text), context menu *Copy Path* copies file paths |
-| Search again, clear, expand / collapse all, show preview | the view's toolbar |
+| Expand / collapse all | the button right of the result count (or the view's toolbar) |
+| Search again, clear, show preview | the view's toolbar |
 
 The view opens on the right, stacked with the Outline, in a fresh perspective (or after *Window > Perspective > Reset
 Perspective*). Otherwise drag its tab to the side you like once, Eclipse remembers the position.

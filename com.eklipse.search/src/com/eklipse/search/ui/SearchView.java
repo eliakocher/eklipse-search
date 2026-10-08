@@ -49,6 +49,7 @@ import org.eclipse.jface.dialogs.ErrorDialog;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.layout.GridLayoutFactory;
+import org.eclipse.jface.resource.FontDescriptor;
 import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.jface.preference.JFacePreferences;
 import org.eclipse.jface.resource.JFaceColors;
@@ -66,8 +67,11 @@ import org.eclipse.swt.custom.SashForm;
 import org.eclipse.swt.dnd.Clipboard;
 import org.eclipse.swt.dnd.TextTransfer;
 import org.eclipse.swt.dnd.Transfer;
+import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Point;
+import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
@@ -77,6 +81,7 @@ import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Listener;
 import org.eclipse.swt.widgets.ProgressBar;
+import org.eclipse.swt.widgets.Sash;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolBar;
 import org.eclipse.swt.widgets.ToolItem;
@@ -140,6 +145,9 @@ public class SearchView extends ViewPart {
 	private static final String DEFAULT_INCLUDES = "*.java";
 	private static final String DEFAULT_EXCLUDES = "testbundle.*, **/node_modules";
 	private static final int[] DEFAULT_PREVIEW_WEIGHTS = { 3, 2 };
+	private static final int SASH_WIDTH = 5;
+	/** How much of the text color is mixed into the background for the line between results and preview. */
+	private static final double SASH_LINE_TEXT_SHARE = 0.25;
 
 	private static final String KEY_QUERY = "query";
 	private static final String KEY_REPLACE = "replace";
@@ -175,9 +183,10 @@ public class SearchView extends ViewPart {
 	private ToolItem preserveCaseItem;
 	private ToolItem replaceAllItem;
 	private ToolItem derivedItem;
-	private Composite searchRow;
-	private Composite replaceRow;
-	private Composite detailsArea;
+	private ToolItem expandToggleItem;
+	private Composite inputFields;
+	private ToolBar optionsBar;
+	private ToolBar replaceBar;
 	private Label summaryLabel;
 	private ProgressBar progressBar;
 	private Label durationLabel;
@@ -208,6 +217,7 @@ public class SearchView extends ViewPart {
 	private final IFileBufferListener bufferListener = new BufferListener();
 	private boolean searchScheduled;
 	private LocalResourceManager resources;
+	private Icons icons;
 	private boolean narrowLayout;
 	private double averageCharWidth;
 	private int lastPreviewContextChars;
@@ -272,7 +282,7 @@ public class SearchView extends ViewPart {
 		root = parent;
 		GridLayoutFactory.fillDefaults().margins(4, 4).spacing(0, 4).applyTo(parent);
 		createInputArea(parent);
-		createDetailsArea(parent);
+		createFilterArea(parent);
 		createSummary(parent);
 		createViewer(parent);
 		editorMarks = new EditorMatchMarks(getSite().getPage(), () -> result);
@@ -302,6 +312,7 @@ public class SearchView extends ViewPart {
 
 	private void createInputArea(Composite parent) {
 		resources = new LocalResourceManager(JFaceResources.getResources(), parent);
+		icons = new Icons(parent.getBackground().getRGB());
 		Composite area = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
 		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 0).applyTo(area);
@@ -312,25 +323,19 @@ public class SearchView extends ViewPart {
 		updateReplaceToggle(false);
 		replaceToggleItem.setToolTipText("Toggle Replace");
 
-		Composite fields = new Composite(area, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(fields);
-		GridLayoutFactory.fillDefaults().spacing(0, 4).applyTo(fields);
+		inputFields = new Composite(area, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(inputFields);
+		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 4).applyTo(inputFields);
 
-		searchRow = createRow(fields);
 		// a plain field like the replace field: the native macOS search field is almost invisible in the dark theme
-		searchText = new Text(searchRow, SWT.SINGLE | SWT.BORDER);
-		searchText.setMessage("Search");
-		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(searchText);
-		ToolBar optionsBar = createRowToolBar(searchRow);
+		searchText = createField(inputFields, "Search");
+		optionsBar = createRowToolBar(inputFields);
 		caseItem = createToggle(optionsBar, overlayIcon("case_sensitive"), "Aa", "Match Case", 'C');
 		wordItem = createToggle(optionsBar, overlayIcon("whole_word"), "ab", "Match Whole Word", 'W');
 		regexItem = createToggle(optionsBar, overlayIcon("regex"), ".*", "Use Regular Expression", 'R');
 
-		replaceRow = createRow(fields);
-		replaceText = new Text(replaceRow, SWT.SINGLE | SWT.BORDER);
-		replaceText.setMessage("Replace");
-		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(replaceText);
-		ToolBar replaceBar = createRowToolBar(replaceRow);
+		replaceText = createField(inputFields, "Replace");
+		replaceBar = createRowToolBar(inputFields);
 		preserveCaseItem = createToggle(replaceBar, null, "AB", "Preserve Case", 'P');
 		replaceAllItem = new ToolItem(replaceBar, SWT.PUSH);
 		setIcon(replaceAllItem, overlayIcon("replace_all"), "All");
@@ -338,14 +343,14 @@ public class SearchView extends ViewPart {
 	}
 
 	private void updateReplaceToggle(boolean expanded) {
-		replaceToggleItem.setImage(resources.create(ChevronImage.descriptor(expanded)));
+		replaceToggleItem.setImage(resources.create(icons.chevron(expanded)));
 	}
 
-	private static Composite createRow(Composite parent) {
-		Composite row = new Composite(parent, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
-		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 2).applyTo(row);
-		return row;
+	private static Text createField(Composite parent, String hint) {
+		Text text = new Text(parent, SWT.SINGLE | SWT.BORDER);
+		text.setMessage(hint);
+		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(text);
+		return text;
 	}
 
 	private static ToolBar createRowToolBar(Composite row) {
@@ -365,9 +370,9 @@ public class SearchView extends ViewPart {
 	 * @return the icon of Eclipse's own find/replace overlay, {@code null} if the installed Eclipse doesn't ship it
 	 *         (2026-09 does, 2024-03 doesn't)
 	 */
-	private static ImageDescriptor overlayIcon(String name) {
-		return ResourceLocator.imageDescriptorFromBundle("org.eclipse.ui.workbench.texteditor",
-				"icons/full/elcl16/" + name + ".png").orElse(null);
+	private ImageDescriptor overlayIcon(String name) {
+		return icons.adapt(ResourceLocator.imageDescriptorFromBundle("org.eclipse.ui.workbench.texteditor",
+				"icons/full/elcl16/" + name + ".png").orElse(null));
 	}
 
 	/**
@@ -382,8 +387,8 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Below {@link #NARROW_WIDTH} the option buttons move below their text field and the include/exclude fields stack,
-	 * so the fields stay usable in a slim side bar.
+	 * Below {@link #NARROW_WIDTH} the option buttons move below their text field, so the search and replace fields
+	 * stay usable in a slim side bar.
 	 */
 	private void updateResponsiveLayout() {
 		int width = root.getClientArea().width;
@@ -392,54 +397,40 @@ public class SearchView extends ViewPart {
 			return;
 		}
 		narrowLayout = narrow;
-		for (Composite row : new Composite[] { searchRow, replaceRow }) {
-			((GridLayout) row.getLayout()).numColumns = narrow ? 1 : 2;
-			Control bar = row.getChildren()[1];
+		((GridLayout) inputFields.getLayout()).numColumns = narrow ? 1 : 2;
+		for (Control bar : new Control[] { optionsBar, replaceBar }) {
 			((GridData) bar.getLayoutData()).horizontalAlignment = narrow ? SWT.END : SWT.BEGINNING;
 		}
-		((GridLayout) detailsArea.getLayout()).numColumns = narrow ? 1 : 2;
 		root.layout(true, true);
 	}
 
-	private void createDetailsArea(Composite parent) {
-		Composite row = new Composite(parent, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
-		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 0).applyTo(row);
-
-		// include and exclude side by side to save vertical space; they stack in a very narrow view
-		detailsArea = new Composite(row, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(detailsArea);
-		GridLayoutFactory.fillDefaults().numColumns(2).equalWidth(true).spacing(6, 2).applyTo(detailsArea);
-
-		includeHistory = createFilterField(detailsArea, "files to include", "e.g. *.java, src/main/**");
+	/**
+	 * Include and exclude below the search field, starting at the left edge below the replace toggle, so the fields get
+	 * as much of a narrow view as possible. Both fields share their edges: the buttons are in one column.
+	 */
+	private void createFilterArea(Composite parent) {
+		Composite area = new Composite(parent, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
+		GridLayoutFactory.fillDefaults().numColumns(3).spacing(2, 4).applyTo(area);
+		includeHistory = createFilterField(area, "Include:", "e.g. *.java, src/main/**");
 		includeText = includeHistory.getText();
-		excludeHistory = createFilterField(detailsArea, "files to exclude", "e.g. **/node_modules");
+		excludeHistory = createFilterField(area, "Exclude:", "e.g. **/node_modules");
 		excludeText = excludeHistory.getText();
-
-		// at the height of the fields, below their labels; next to the exclude field when they stack
-		ToolBar derivedBar = new ToolBar(row, SWT.FLAT);
-		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.END).applyTo(derivedBar);
-		ImageDescriptor filter = ResourceLocator
-				.imageDescriptorFromBundle("org.eclipse.ui.ide", "icons/full/elcl16/filter_ps.png").orElse(null);
-		derivedItem = createToggle(derivedBar, filter, "D",
+		derivedItem = createToggle(excludeHistory.getDropDown().getParent(), icons.funnel(), "D",
 				"Skip Derived Resources, the build output Eclipse marks as derived, e.g. Maven target/ folders", 'D');
 	}
 
 	private FieldHistory createFilterField(Composite parent, String label, String hint) {
-		Composite box = new Composite(parent, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(box);
-		GridLayoutFactory.fillDefaults().numColumns(2).spacing(0, 2).applyTo(box);
-		Label title = new Label(box, SWT.NONE);
+		Label title = new Label(parent, SWT.NONE);
 		title.setText(label);
-		GridDataFactory.fillDefaults().span(2, 1).applyTo(title);
-		Text text = new Text(box, SWT.SINGLE | SWT.BORDER);
+		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.CENTER).applyTo(title);
+		Text text = new Text(parent, SWT.SINGLE | SWT.BORDER);
 		text.setMessage(hint);
 		text.setToolTipText(hint);
-		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(text);
-		ToolBar bar = new ToolBar(box, SWT.FLAT);
-		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.CENTER).applyTo(bar);
+		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).indent(2, 0).applyTo(text);
+		ToolBar bar = createRowToolBar(parent);
 		ToolItem dropDown = new ToolItem(bar, SWT.PUSH);
-		dropDown.setImage(resources.create(ChevronImage.descriptor(true)));
+		dropDown.setImage(resources.create(icons.chevron(true)));
 		dropDown.setToolTipText("Recently Used (↓)");
 		return new FieldHistory(text, dropDown);
 	}
@@ -447,9 +438,9 @@ public class SearchView extends ViewPart {
 	private void createSummary(Composite parent) {
 		Composite row = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(row);
-		GridLayoutFactory.fillDefaults().numColumns(3).spacing(6, 0).applyTo(row);
+		GridLayoutFactory.fillDefaults().numColumns(4).spacing(6, 0).applyTo(row);
 		summaryLabel = new Label(row, SWT.WRAP);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(summaryLabel);
+		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(summaryLabel);
 		// the progress while searching, then how long it took, in one place on the right
 		progressBar = new ProgressBar(row, SWT.HORIZONTAL);
 		progressBar.setMaximum(PROGRESS_STEPS);
@@ -458,7 +449,12 @@ public class SearchView extends ViewPart {
 		progressBar.setVisible(false);
 		durationLabel = new Label(row, SWT.NONE);
 		durationLabel.setForeground(JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR));
-		GridDataFactory.fillDefaults().align(SWT.END, SWT.BEGINNING).applyTo(durationLabel);
+		GridDataFactory.fillDefaults().align(SWT.END, SWT.CENTER).applyTo(durationLabel);
+		// one button like VS Code: collapses all while any file is expanded, expands all otherwise
+		ToolBar expandBar = new ToolBar(row, SWT.FLAT);
+		GridDataFactory.fillDefaults().align(SWT.END, SWT.CENTER).applyTo(expandBar);
+		expandToggleItem = new ToolItem(expandBar, SWT.PUSH);
+		updateExpandToggle();
 	}
 
 	private void createViewer(Composite parent) {
@@ -472,24 +468,67 @@ public class SearchView extends ViewPart {
 		viewer.setContentProvider(new ResultContentProvider());
 		// a single column kept as wide as the view; without it the tree grows to the longest line and scrolls sideways
 		TreeViewerColumn column = new TreeViewerColumn(viewer, SWT.NONE);
-		column.setLabelProvider(new ResultLabelProvider(this::previewReplacement, this::previewContextChars));
+		Font pathFont = resources.create(FontDescriptor.createFrom(tree.getFont()).increaseHeight(-2));
+		column.setLabelProvider(
+				new ResultLabelProvider(this::previewReplacement, this::previewContextChars, pathFont));
+		// the selection is lighter while the results have the focus
+		tree.addListener(SWT.FocusIn, e -> tree.redraw());
+		tree.addListener(SWT.FocusOut, e -> tree.redraw());
 		tree.addListener(SWT.Resize, e -> fitColumn());
-		// expanding can show the vertical scroll bar, which narrows the tree without a resize event
-		Listener refit = e -> display.asyncExec(this::fitColumn);
-		tree.addListener(SWT.Expand, refit);
-		tree.addListener(SWT.Collapse, refit);
+		// expanding can show the vertical scroll bar, which narrows the tree without a resize event; both events come
+		// before the item changes
+		Listener expansion = e -> display.asyncExec(() -> {
+			fitColumn();
+			updateExpandToggle();
+		});
+		tree.addListener(SWT.Expand, expansion);
+		tree.addListener(SWT.Collapse, expansion);
 		viewer.setComparator(new ResultComparator());
 		ColumnViewerToolTipSupport.enableFor(viewer);
 		viewer.setInput(result);
 		getSite().setSelectionProvider(viewer);
 		preview = new PreviewPane(resultSash);
 		resultSash.setWeights(DEFAULT_PREVIEW_WEIGHTS);
+		drawSashLines();
 		GC gc = new GC(viewer.getTree());
 		try {
 			averageCharWidth = gc.getFontMetrics().getAverageCharacterWidth();
 		} finally {
 			gc.dispose();
 		}
+	}
+
+	/**
+	 * A line across the gap between the results and the preview, so it's visible that the gap can be dragged.
+	 */
+	private void drawSashLines() {
+		resultSash.setSashWidth(SASH_WIDTH);
+		// the sash is created by the first layout with a size, after the resize event
+		resultSash.addListener(SWT.Resize, e -> display.asyncExec(() -> {
+			if (resultSash.isDisposed()) {
+				return;
+			}
+			for (Control child : resultSash.getChildren()) {
+				if (child instanceof Sash sash && sash.getListeners(SWT.Paint).length == 0) {
+					sash.addListener(SWT.Paint, this::drawSashLine);
+					sash.redraw();
+				}
+			}
+		}));
+	}
+
+	private void drawSashLine(Event e) {
+		Tree tree = viewer.getTree();
+		RGB background = tree.getBackground().getRGB();
+		RGB text = tree.getForeground().getRGB();
+		e.gc.setForeground(new Color(mix(background.red, text.red), mix(background.green, text.green),
+				mix(background.blue, text.blue)));
+		Point size = ((Control) e.widget).getSize();
+		e.gc.drawLine(0, size.y / 2, size.x, size.y / 2);
+	}
+
+	private static int mix(int background, int text) {
+		return background + (int) ((text - background) * SASH_LINE_TEXT_SHARE);
 	}
 
 	/**
@@ -644,6 +683,15 @@ public class SearchView extends ViewPart {
 		preserveCaseItem.addListener(SWT.Selection, e -> scheduleLabelRefresh());
 		replaceAllItem.addListener(SWT.Selection, e -> replaceAll(true));
 		derivedItem.addListener(SWT.Selection, e -> scheduleSearch(0));
+		expandToggleItem.addListener(SWT.Selection, e -> {
+			if (anyExpanded(viewer.getTree())) {
+				viewer.collapseAll();
+			} else {
+				viewer.expandAll();
+			}
+			fitColumn();
+			updateExpandToggle();
+		});
 
 		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
 		searchText.addListener(SWT.DefaultSelection, e -> scheduleSearch(0));
@@ -726,11 +774,11 @@ public class SearchView extends ViewPart {
 	}
 
 	private boolean isReplaceVisible() {
-		return replaceRow.getVisible();
+		return replaceText.getVisible();
 	}
 
 	private void setReplaceVisible(boolean visible) {
-		setVisible(replaceRow, visible);
+		setVisible(visible, replaceText, replaceBar);
 		updateReplaceToggle(visible);
 		if (visible) {
 			replaceText.setFocus();
@@ -738,9 +786,11 @@ public class SearchView extends ViewPart {
 		scheduleLabelRefresh();
 	}
 
-	private void setVisible(Control control, boolean visible) {
-		((GridData) control.getLayoutData()).exclude = !visible;
-		control.setVisible(visible);
+	private void setVisible(boolean visible, Control... controls) {
+		for (Control control : controls) {
+			((GridData) control.getLayoutData()).exclude = !visible;
+			control.setVisible(visible);
+		}
 		root.layout(true, true);
 	}
 
@@ -1002,6 +1052,7 @@ public class SearchView extends ViewPart {
 	}
 
 	private void updateSummary() {
+		updateExpandToggle();
 		SearchSession s = session;
 		if (s == null) {
 			return;
@@ -1068,6 +1119,26 @@ public class SearchView extends ViewPart {
 
 	private static String formatDuration(long millis) {
 		return millis < 1000 ? millis + " ms" : String.format("%.1f s", millis / 1000.0);
+	}
+
+	private void updateExpandToggle() {
+		if (expandToggleItem.isDisposed()) {
+			return;
+		}
+		Tree tree = viewer != null ? viewer.getTree() : null;
+		boolean collapse = tree != null && anyExpanded(tree);
+		expandToggleItem.setImage(resources.create(collapse ? icons.collapseAll() : icons.expandAll()));
+		expandToggleItem.setToolTipText(collapse ? "Collapse All" : "Expand All");
+		expandToggleItem.setEnabled(tree != null && tree.getItemCount() > 0);
+	}
+
+	private static boolean anyExpanded(Tree tree) {
+		for (TreeItem item : tree.getItems()) {
+			if (item.getExpanded()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private void clear() {
@@ -1611,6 +1682,10 @@ public class SearchView extends ViewPart {
 		return includeText;
 	}
 
+	Text getExcludeText() {
+		return excludeText;
+	}
+
 	FieldHistory getIncludeHistory() {
 		return includeHistory;
 	}
@@ -1686,7 +1761,7 @@ public class SearchView extends ViewPart {
 		preserveCaseItem.setSelection(bool(m, KEY_PRESERVE_CASE, false));
 		derivedItem.setSelection(bool(m, KEY_DERIVED, true));
 		boolean replaceVisible = bool(m, KEY_REPLACE_VISIBLE, false);
-		setVisible(replaceRow, replaceVisible);
+		setVisible(replaceVisible, replaceText, replaceBar);
 		updateReplaceToggle(replaceVisible);
 		resultSash.setWeights(weights(string(m, KEY_PREVIEW_WEIGHTS, null)));
 		setPreviewVisible(bool(m, KEY_PREVIEW, true));

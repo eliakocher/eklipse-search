@@ -246,8 +246,10 @@ class SearchViewUiTest {
 		view.activateSearch("sms");
 		waitForSearch();
 		assertEquals("16 results in 3 files", view.getSummary());
-		Control[] filters = view.getIncludeText().getParent().getParent().getChildren();
-		assertEquals(filters[0].getBounds().y, filters[1].getBounds().y, "include and exclude side by side");
+		Rectangle include = view.getIncludeText().getBounds();
+		Rectangle exclude = view.getExcludeText().getBounds();
+		assertEquals(include.x, exclude.x, "include and exclude start at the same edge");
+		assertEquals(include.width, exclude.width, "include and exclude end at the same edge");
 		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
 		click(view.getResult().get(configuration).getMatches().get(2));
 		waitUntil(() -> CONFIGURATION.equals(view.getPreview().getTextWidget().getText()), 5_000);
@@ -264,7 +266,6 @@ class SearchViewUiTest {
 		Control options = searchField.getParent().getChildren()[1];
 		assertTrue(view.getRoot().getSize().x < 260, "side bar width " + view.getRoot().getSize().x);
 		assertTrue(options.getBounds().y > searchField.getBounds().y, "options should wrap below the field");
-		assertTrue(filters[1].getBounds().y > filters[0].getBounds().y, "include and exclude should stack");
 		screenshot(view.getRoot(), "7-sidebar-very-narrow");
 	}
 

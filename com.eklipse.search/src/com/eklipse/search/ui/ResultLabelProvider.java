@@ -7,21 +7,34 @@ import java.util.function.Function;
 import java.util.function.IntSupplier;
 
 import org.eclipse.core.resources.IFile;
+import org.eclipse.jface.preference.JFacePreferences;
+import org.eclipse.jface.resource.ColorRegistry;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.viewers.StyledCellLabelProvider;
 import org.eclipse.jface.viewers.StyledString;
 import org.eclipse.jface.viewers.StyledString.Styler;
 import org.eclipse.jface.viewers.ViewerCell;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.graphics.Color;
+import org.eclipse.swt.graphics.Font;
+import org.eclipse.swt.graphics.GC;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.RGB;
+import org.eclipse.swt.graphics.Rectangle;
+import org.eclipse.swt.graphics.TextLayout;
 import org.eclipse.swt.graphics.TextStyle;
+import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Tree;
+import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.ui.model.WorkbenchLabelProvider;
 
 import com.eklipse.search.core.FileMatch;
 import com.eklipse.search.core.LineMatch;
 
 /**
- * Renders files as {@code Name.java  project/folder  3} and matches as their line with the match highlighted. While
- * the replace field is in use, the match is struck through and followed by its replacement.
+ * Renders files as {@code Name.java 3  project/folder} and matches as their line with the match highlighted. While the
+ * replace field is in use, the match is struck through and followed by its replacement. The selection is painted in a
+ * muted gray rather than the native accent color, so the highlighted match stays visible in the selected row.
  */
 final class ResultLabelProvider extends StyledCellLabelProvider {
 
@@ -30,6 +43,10 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	private static final String REMOVED_HIGHLIGHT = "com.eklipse.search.replace.removed";
 	private static final String ADDED_HIGHLIGHT = "com.eklipse.search.replace.added";
 	private static final String ELLIPSIS = "…";
+	private static final String PATH_SEPARATOR = "  ";
+	/** How much of the text color is mixed into the background for the selection, with and without the focus. */
+	private static final double FOCUSED_SELECTION = 0.2;
+	private static final double SELECTION = 0.12;
 
 	private final Function<LineMatch, String> replacementPreview;
 	private final IntSupplier contextChars;
@@ -38,14 +55,20 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	private final Styler matchStyler = background(MATCH_HIGHLIGHT, false);
 	private final Styler removedStyler = background(REMOVED_HIGHLIGHT, true);
 	private final Styler addedStyler = background(ADDED_HIGHLIGHT, false);
+	private final Font pathFont;
+	private TextLayout fileLayout;
 
 	/**
 	 * @param replacementPreview returns the replacement to preview for a match, {@code null} for no preview
 	 * @param contextChars returns how many characters before a match fit into the view
+	 * @param pathFont the font of the folder after a file name
 	 */
-	ResultLabelProvider(Function<LineMatch, String> replacementPreview, IntSupplier contextChars) {
+	ResultLabelProvider(Function<LineMatch, String> replacementPreview, IntSupplier contextChars, Font pathFont) {
+		// the selection is painted here, in a gray the match highlight works on
+		super(COLORS_ON_SELECTION);
 		this.replacementPreview = replacementPreview;
 		this.contextChars = contextChars;
+		this.pathFont = pathFont;
 	}
 
 	/**
@@ -78,7 +101,7 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			// the count comes before the path, so it stays visible when a narrow view cuts the path
 			StyledString text = new StyledString(file.getName());
 			text.append(" " + fileMatch.getMatchCount(), StyledString.COUNTER_STYLER);
-			text.append("  " + file.getParent().getFullPath().makeRelative(), StyledString.QUALIFIER_STYLER);
+			text.append(PATH_SEPARATOR + folder(file), StyledString.QUALIFIER_STYLER);
 			return text;
 		}
 		if (element instanceof LineMatch match) {
@@ -114,11 +137,124 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		return null;
 	}
 
+	/**
+	 * Paints the selection, before the row's content, and clears the selected state: SWT then skips its own selection
+	 * and the text keeps its colors.
+	 */
+	@Override
+	protected void erase(Event event, Object element) {
+		super.erase(event, element);
+		if ((event.detail & SWT.SELECTED) != 0) {
+			Tree tree = (Tree) event.widget;
+			GC gc = event.gc;
+			gc.setBackground(mix(tree, tree.isFocusControl() ? FOCUSED_SELECTION : SELECTION));
+			gc.fillRectangle(event.x, event.y, event.width, event.height);
+			gc.setForeground(tree.getForeground());
+			event.detail &= ~SWT.SELECTED;
+		}
+	}
+
+	private static Color mix(Tree tree, double textShare) {
+		RGB background = tree.getBackground().getRGB();
+		RGB text = tree.getForeground().getRGB();
+		return new Color((int) (background.red + (text.red - background.red) * textShare),
+				(int) (background.green + (text.green - background.green) * textShare),
+				(int) (background.blue + (text.blue - background.blue) * textShare));
+	}
+
+	@Override
+	protected void paint(Event event, Object element) {
+		if (element instanceof FileMatch fileMatch) {
+			paintFile(event, fileMatch);
+		} else {
+			super.paint(event, element);
+		}
+	}
+
+	/**
+	 * Like {@code super.paint}, with the folder in a smaller font and shortened in the middle to fit: the project and
+	 * the innermost folders say more than the cut off end of a long path.
+	 */
+	private void paintFile(Event event, FileMatch fileMatch) {
+		TreeItem item = (TreeItem) event.item;
+		GC gc = event.gc;
+		Image image = item.getImage();
+		if (image != null) {
+			Rectangle area = item.getImageBounds(0);
+			Rectangle size = image.getBounds();
+			gc.drawImage(image, area.x + Math.max(0, (area.width - size.width) / 2),
+					area.y + Math.max(0, (area.height - size.height) / 2));
+		}
+		IFile file = fileMatch.getFile();
+		String name = file.getName() + " " + fileMatch.getMatchCount() + PATH_SEPARATOR;
+		Rectangle textArea = item.getTextBounds(0);
+		Font font = gc.getFont();
+		int width = item.getParent().getClientArea().width - textArea.x - gc.textExtent(name).x;
+		gc.setFont(pathFont);
+		String text = name + shorten(gc, folder(file), width);
+		gc.setFont(font);
+
+		if (fileLayout == null) {
+			fileLayout = new TextLayout(event.display);
+		}
+		// a new text clears the styles, the same one keeps them
+		fileLayout.setText("");
+		fileLayout.setText(text);
+		fileLayout.setFont(font);
+		int countStart = file.getName().length() + 1;
+		int pathStart = name.length();
+		ColorRegistry colors = JFaceResources.getColorRegistry();
+		fileLayout.setStyle(new TextStyle(null, colors.get(JFacePreferences.COUNTER_COLOR), null), countStart,
+				pathStart - 1);
+		fileLayout.setStyle(new TextStyle(pathFont, colors.get(JFacePreferences.QUALIFIER_COLOR), null), pathStart,
+				text.length() - 1);
+		fileLayout.draw(gc, textArea.x,
+				textArea.y + Math.max(0, (textArea.height - fileLayout.getBounds().height) / 2));
+	}
+
+	private static String folder(IFile file) {
+		return file.getParent().getFullPath().makeRelative().toString();
+	}
+
+	/**
+	 * @param gc measures with its font
+	 * @return the path, or its first segment and as many of its last ones as fit, e.g. {@code project/…/main/java}
+	 */
+	private static String shorten(GC gc, String path, int width) {
+		String[] segments = path.split("/");
+		if (segments.length < 3 || gc.textExtent(path).x <= width) {
+			return path;
+		}
+		// the more last segments are kept, the wider: find the most that fit, at least one
+		int low = 1;
+		int high = segments.length - 2;
+		while (low < high) {
+			int middle = (low + high + 1) / 2;
+			if (gc.textExtent(keepLast(segments, middle)).x <= width) {
+				low = middle;
+			} else {
+				high = middle - 1;
+			}
+		}
+		return keepLast(segments, low);
+	}
+
+	private static String keepLast(String[] segments, int count) {
+		StringBuilder path = new StringBuilder(segments[0]).append('/').append(ELLIPSIS);
+		for (int i = segments.length - count; i < segments.length; i++) {
+			path.append('/').append(segments[i]);
+		}
+		return path.toString();
+	}
+
 	@Override
 	public void dispose() {
 		// the images are owned by the workbench label provider
 		fileImages.clear();
 		workbenchLabels.dispose();
+		if (fileLayout != null) {
+			fileLayout.dispose();
+		}
 		super.dispose();
 	}
 
