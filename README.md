@@ -43,7 +43,7 @@ See [Usage](#usage) for everything else.
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.7-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.8-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -66,10 +66,10 @@ See [Usage](#usage) for everything else.
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.7-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.8-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.7-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.8-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -89,14 +89,14 @@ See [Usage](#usage) for everything else.
   takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
   searches the files that already had matches, and the previous results stay until the new ones arrive
 - **Aa** match case, **ab** whole word next to the search field, *Use Regular Expression* in the view's ⋮ menu
-- Replace field (toggle with the chevron) with **AB** preserve case and **Replace All**
+- Replace field (toggle with the chevron, together with *Include* and *Exclude*) with **AB** preserve case and **Replace All**
   - matches are previewed as ~~old~~new in the results
   - regex replacements support `$1`, `${name}`, `$0`/`$&`, `\n`, `\t`
   - replace one match, a file or a selection from the context menu
   - unsaved editors are updated in place and stay unsaved, everything can be undone (Edit > Undo while the view is active)
   - files changed since the search are skipped instead of being replaced at the wrong position
-- *Include* (prefilled with `*.java`) / *Exclude* (prefilled with `testbundle.*, **/node_modules`): VS Code
-  globs (see below), always visible below the search field. *Skip Derived Resources* in the view's ⋮ menu leaves out
+- *Include* (prefilled with `*.java`) / *Exclude* (prefilled with `testbundle.*, *.webapi.*, **/node_modules`): VS Code
+  globs (see below), shown below the replace field with the chevron, and applied while hidden too. *Skip Derived Resources* in the view's ⋮ menu leaves out
   the build output Eclipse marks as derived, e.g. Maven `target/` folders (on by default). The view remembers what
   you enter there, and the search options, across restarts. Both are combo boxes: the arrow in the field lists the
   last 15 values you used there, a value counts once you leave the field or press `Enter`

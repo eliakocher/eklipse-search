@@ -158,12 +158,14 @@ public class SearchView extends ViewPart {
 	private static final String PREVIOUS_DEFAULT_EXCLUDES = "testbundle.*, **/node_modules";
 	/** The context of the view's key bindings, see {@link #activateShortcuts()}. */
 	private static final String CONTEXT_ID = "com.eklipse.search.context";
+	/** The key of a widget's CSS id, see {@code org.eclipse.e4.ui.css.swt.CSSSWTConstants}. */
+	private static final String CSS_ID_KEY = "org.eclipse.e4.ui.css.id";
+	private static final String HEADER_CSS_ID = "com-eklipse-search-header";
 	private static final int[] DEFAULT_PREVIEW_WEIGHTS = { 3, 2 };
 	private static final int SASH_WIDTH = 5;
 	/** How much of the text color is mixed into the background for the line between results and preview. */
 	private static final double SASH_LINE_TEXT_SHARE = 0.25;
 
-	private static final String KEY_QUERY = "query";
 	private static final String KEY_REPLACE = "replace";
 	private static final String KEY_INCLUDES = "includes";
 	private static final String KEY_EXCLUDES = "excludes";
@@ -202,6 +204,7 @@ public class SearchView extends ViewPart {
 	private Composite inputFields;
 	private ToolBar optionsBar;
 	private ToolBar replaceBar;
+	private Composite filterArea;
 	private Label summaryLabel;
 	private ProgressBar progressBar;
 	private Label durationLabel;
@@ -316,11 +319,21 @@ public class SearchView extends ViewPart {
 	public void createPartControl(Composite parent) {
 		display = parent.getDisplay();
 		root = parent;
-		GridLayoutFactory.fillDefaults().margins(4, 4).spacing(0, 4).applyTo(parent);
-		createInputArea(parent);
-		createFilterArea(parent);
-		createSummary(parent);
-		createViewer(parent);
+		resources = new LocalResourceManager(JFaceResources.getResources(), parent);
+		icons = new Icons(parent.getBackground().getRGB(), display.getSystemColor(SWT.COLOR_LIST_SELECTION).getRGB());
+		GridLayoutFactory.fillDefaults().spacing(0, 0).applyTo(parent);
+		// the fields on the background of dialogs, set by the dark theme in css/dark.css; in the light one views have it
+		Composite header = new Composite(parent, SWT.NONE);
+		header.setData(CSS_ID_KEY, HEADER_CSS_ID);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(header);
+		GridLayoutFactory.fillDefaults().margins(4, 4).spacing(0, 4).applyTo(header);
+		createInputArea(header);
+		createFilterArea(header);
+		Composite body = new Composite(parent, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, true).applyTo(body);
+		GridLayoutFactory.fillDefaults().margins(4, 4).spacing(0, 4).applyTo(body);
+		createSummary(body);
+		createViewer(body);
 		editorMarks = new EditorMatchMarks(getSite().getPage(), () -> result);
 		createActions();
 		contributeToActionBars();
@@ -340,17 +353,11 @@ public class SearchView extends ViewPart {
 		resourceListener = this::resourceChanged;
 		ResourcesPlugin.getWorkspace().addResourceChangeListener(resourceListener, IResourceChangeEvent.POST_CHANGE);
 		FileBuffers.getTextFileBufferManager().addFileBufferListener(bufferListener);
-		if (!searchText.getText().isEmpty()) {
-			scheduleSearch(0);
-		}
 	}
 
 	// ---------------------------------------------------------------------------------------------------- widgets
 
 	private void createInputArea(Composite parent) {
-		resources = new LocalResourceManager(JFaceResources.getResources(), parent);
-		icons = new Icons(parent.getBackground().getRGB(),
-				parent.getDisplay().getSystemColor(SWT.COLOR_LIST_SELECTION).getRGB());
 		Composite area = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
 		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 0).applyTo(area);
@@ -359,13 +366,12 @@ public class SearchView extends ViewPart {
 		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.BEGINNING).applyTo(toggleBar);
 		replaceToggleItem = new ToolItem(toggleBar, SWT.PUSH);
 		updateReplaceToggle(false);
-		replaceToggleItem.setToolTipText("Toggle Replace");
+		replaceToggleItem.setToolTipText("Toggle Replace, Include and Exclude");
 
 		inputFields = new Composite(area, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(inputFields);
 		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 4).applyTo(inputFields);
 
-		// a plain field like the replace field: the native macOS search field is almost invisible in the dark theme
 		searchText = createField(inputFields, "Search");
 		searchHistory = new SearchHistory(searchText);
 		optionsBar = createRowToolBar(inputFields);
@@ -392,8 +398,11 @@ public class SearchView extends ViewPart {
 		searchText.setMessage(wildcards ? "Search, * for any text" : "Search");
 	}
 
+	/**
+	 * @return a native search field with a button that clears it
+	 */
 	private static Text createField(Composite parent, String hint) {
-		Text text = new Text(parent, SWT.SINGLE | SWT.BORDER);
+		Text text = new Text(parent, SWT.SINGLE | SWT.BORDER | SWT.SEARCH | SWT.ICON_CANCEL);
 		text.setMessage(hint);
 		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).applyTo(text);
 		return text;
@@ -473,12 +482,12 @@ public class SearchView extends ViewPart {
 	 * as much of a narrow view as possible. Both fields share their edges: the buttons are in one column.
 	 */
 	private void createFilterArea(Composite parent) {
-		Composite area = new Composite(parent, SWT.NONE);
-		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
-		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 4).applyTo(area);
-		includeHistory = createFilterField(area, "Include:", "e.g. *.java, src/main/**");
+		filterArea = new Composite(parent, SWT.NONE);
+		GridDataFactory.fillDefaults().grab(true, false).applyTo(filterArea);
+		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 4).applyTo(filterArea);
+		includeHistory = createFilterField(filterArea, "Include:", "e.g. *.java, src/main/**");
 		includeField = includeHistory.getCombo();
-		excludeHistory = createFilterField(area, "Exclude:", "e.g. **/node_modules");
+		excludeHistory = createFilterField(filterArea, "Exclude:", "e.g. **/node_modules");
 		excludeField = excludeHistory.getCombo();
 	}
 
@@ -924,8 +933,12 @@ public class SearchView extends ViewPart {
 		return replaceText.getVisible();
 	}
 
+	/**
+	 * Shows or hides the replace field together with include and exclude, which still apply while hidden: a search
+	 * without results names the includes.
+	 */
 	private void setReplaceVisible(boolean visible) {
-		setVisible(visible, replaceText, replaceBar);
+		setVisible(visible, replaceText, replaceBar, filterArea);
 		updateReplaceToggle(visible);
 		if (visible) {
 			replaceText.setFocus();
@@ -2031,7 +2044,6 @@ public class SearchView extends ViewPart {
 
 	private void restoreState() {
 		IMemento m = memento;
-		searchText.setText(string(m, KEY_QUERY, ""));
 		replaceText.setText(string(m, KEY_REPLACE, ""));
 		includeField.setText(string(m, KEY_INCLUDES, DEFAULT_INCLUDES));
 		String excludes = string(m, KEY_EXCLUDES, DEFAULT_EXCLUDES);
@@ -2050,7 +2062,7 @@ public class SearchView extends ViewPart {
 		wildcardAction.setChecked(bool(m, KEY_WILDCARDS, true));
 		fileNamesAction.setChecked(bool(m, KEY_FILE_NAMES, true));
 		boolean replaceVisible = bool(m, KEY_REPLACE_VISIBLE, false);
-		setVisible(replaceVisible, replaceText, replaceBar);
+		setVisible(replaceVisible, replaceText, replaceBar, filterArea);
 		updateReplaceToggle(replaceVisible);
 		resultSash.setWeights(weights(string(m, KEY_PREVIEW_WEIGHTS, null)));
 		setPreviewVisible(bool(m, KEY_PREVIEW, true));
@@ -2079,7 +2091,6 @@ public class SearchView extends ViewPart {
 			}
 			return;
 		}
-		m.putString(KEY_QUERY, searchText.getText());
 		m.putString(KEY_REPLACE, replaceText.getText());
 		m.putString(KEY_INCLUDES, includeField.getText());
 		m.putString(KEY_EXCLUDES, excludeField.getText());

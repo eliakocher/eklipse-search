@@ -130,7 +130,7 @@ final class EmptyState {
 				"Delete hides a result until the next search.",
 				ctrl + "C copies the selected results with their line numbers.",
 				(Util.isMac() ? "⌘↩" : "Ctrl+Enter") + " in the replace field replaces all matches.",
-				"Include src/main/** to leave out the tests.",
+				"Include src/main/** to leave out the tests, › shows the field.",
 				"* matches any text: final*size finds final int size, \\* a star.");
 	}
 

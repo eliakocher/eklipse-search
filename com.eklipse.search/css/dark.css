@@ -4,3 +4,23 @@ IEclipsePreferences#org-eclipse-ui-workbench:com-eklipse-search { /* pseudo attr
 		'com.eklipse.search.replace.removed=110,40,40'
 		'com.eklipse.search.replace.added=36,84,40'
 }
+
+/* The fields on the background of dialogs, like in Open Resource: the search fields stand out of it. The buttons are
+   styled one by one, the combo boxes like in dialogs, e.g. Search > File. The labels in the color of dialogs too, the
+   views' gray is too dim on it. */
+#com-eklipse-search-header,
+#com-eklipse-search-header Composite,
+#com-eklipse-search-header ToolBar,
+#com-eklipse-search-header ToolItem,
+#com-eklipse-search-header Combo,
+#com-eklipse-search-header Label {
+	background-color: '#org-eclipse-ui-workbench-DARK_BACKGROUND';
+	color: '#org-eclipse-ui-workbench-DARK_FOREGROUND';
+}
+
+/* The search fields like everywhere else in the dark theme, see Text[style~='SWT.SEARCH'] in its
+   e4-dark_globalstyle.css, e.g. in Open Resource: the views' rules are more specific. */
+#com-eklipse-search-header Text[style~='SWT.SEARCH'] {
+	background-color: #333;
+	color: #F4F7F7;
+}
