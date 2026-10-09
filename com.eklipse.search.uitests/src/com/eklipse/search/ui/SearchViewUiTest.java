@@ -431,21 +431,52 @@ class SearchViewUiTest {
 	}
 
 	@Test
-	void browsesTheRecentSearchesWithTheArrowKeys() {
+	void picksAndOpensResultsFromTheSearchField() {
+		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile readme = project.getFile("docs/README.md");
+		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
+		IDE.setDefaultEditor(readme, "org.eclipse.ui.DefaultTextEditor");
 		Text search = view.getSearchText();
-		for (String value : new String[] { "sms", "sendSms" }) {
-			search.setText(value);
-			search.notifyListeners(SWT.DefaultSelection, new Event());
-		}
-		// ↑ skips the search just made
-		assertEquals("sms", press(search, SWT.ARROW_UP));
-		assertEquals("sendSms", press(search, SWT.ARROW_DOWN));
+		Supplier<Object> selected = () -> view.getViewer().getStructuredSelection().getFirstElement();
+		view.activateSearch("sendSms");
+		waitForSearch();
+		view.activateSearch("sms");
+		waitForSearch();
+		Object first = view.getViewer().getTree().getItem(0).getData();
+		assertSame(first, selected.get(), "the first result is selected");
 
-		search.setText("typed");
-		assertEquals("sendSms", press(search, SWT.ARROW_UP));
+		// ↓ skips the row of a file shown with its matches, the field keeps its text
+		LineMatch readmeMatch = view.getResult().get(readme).getMatches().get(0);
+		assertEquals("sms", press(search, SWT.ARROW_DOWN));
+		assertSame(readmeMatch, selected.get());
+		press(search, SWT.ARROW_UP);
+		assertSame(first, selected.get());
+		press(search, SWT.ARROW_DOWN);
+		search.notifyListeners(SWT.DefaultSelection, new Event());
+		processEvents();
+		assertEquals(readmeMatch.getOffset(), editorSelection().getOffset());
+
+		// back in the field (in the editor Alt+↑ moves the line): ↑ stops at the first result, Alt+↑ and Alt+↓
+		// browse the recent searches without the one just made
+		page.activate(view);
+		processEvents();
+		press(search, SWT.ARROW_UP);
 		assertEquals("sms", press(search, SWT.ARROW_UP));
-		assertEquals("sendSms", press(search, SWT.ARROW_DOWN));
-		assertEquals("typed", press(search, SWT.ARROW_DOWN));
+		assertSame(first, selected.get());
+		assertEquals("sendSms", press(search, SWT.ARROW_UP, SWT.ALT));
+		assertEquals("sms", press(search, SWT.ARROW_DOWN, SWT.ALT));
+		assertEquals("sendSms", press(search, SWT.ARROW_UP, SWT.ALT));
+		// Enter before its results are there opens the first one once they are
+		search.notifyListeners(SWT.DefaultSelection, new Event());
+		waitForSearch();
+		processEvents();
+		assertEquals(configuration, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
+		assertEquals("sendSms", editorSelection().getText());
+	}
+
+	private ITextSelection editorSelection() {
+		ITextEditor editor = (ITextEditor) page.getActiveEditor();
+		return (ITextSelection) editor.getSelectionProvider().getSelection();
 	}
 
 	@Test
@@ -468,8 +499,16 @@ class SearchViewUiTest {
 	 * @return the text after the key
 	 */
 	private static String press(Text text, int keyCode) {
+		return press(text, keyCode, SWT.NONE);
+	}
+
+	/**
+	 * @return the text after the key
+	 */
+	private static String press(Text text, int keyCode, int stateMask) {
 		Event event = new Event();
 		event.keyCode = keyCode;
+		event.stateMask = stateMask;
 		text.notifyListeners(SWT.KeyDown, event);
 		return text.getText();
 	}

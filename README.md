@@ -43,7 +43,7 @@ See [Usage](#usage) for everything else.
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.8-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.9-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -66,10 +66,10 @@ See [Usage](#usage) for everything else.
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.8-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.9-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.8-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.9-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -87,7 +87,8 @@ See [Usage](#usage) for everything else.
 
 - Search as you type across all open projects, results stream in while the search runs, with a progress bar when it
   takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
-  searches the files that already had matches, and the previous results stay until the new ones arrive
+  searches the files that already had matches, and the previous results stay until the new ones arrive. The first
+  result is selected, `Enter` in the search field opens it
 - **Aa** match case, **ab** whole word next to the search field, *Use Regular Expression* in the view's ⋮ menu
 - Replace field (toggle with the chevron, together with *Include* and *Exclude*) with **AB** preserve case and **Replace All**
   - matches are previewed as ~~old~~new in the results
@@ -135,7 +136,8 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 | Open the view | `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS), *Search > Eklipse Search...*, or *Window > Show View > General > Search* (the one with the blue magnifier, Eclipse's own search results view has the same name) |
 | Prefill | select text in an editor before opening the view |
 | Toggle match case / whole word / regex / preserve case / skip derived resources | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` / `Alt+D` (`⌥` on macOS), or click the buttons (regex and derived resources: the view's ⋮ menu) |
-| Previous searches | `↑` / `↓` in the search field, the last 10 like in a terminal (a search counts once you leave the field or press `Enter`) |
+| Open a result from the search field | `Enter` opens the selected result, the first one unless `↓` / `↑` (or `Page Down` / `Page Up`) picked another, like in *Open Resource*; the focus stays in the field while you pick |
+| Previous searches | `Alt+↑` / `Alt+↓` (`⌥` on macOS) in the search field, the last 10 like in a terminal (a search counts once it's done) |
 | Reuse an include/exclude pattern | the arrow in the field |
 | Preview a match | click it: the file shows below the results. With *Show Preview* off, it opens in the editor without leaving the view |
 | Open a match | double-click or `Enter` |

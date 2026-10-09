@@ -3,6 +3,7 @@ package com.eklipse.search.ui;
 import java.lang.reflect.InvocationTargetException;
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -241,6 +242,8 @@ public class SearchView extends ViewPart {
 	private IResourceChangeListener resourceListener;
 	private final IFileBufferListener bufferListener = new BufferListener();
 	private boolean searchScheduled;
+	/** The first result, selected by {@link #selectFirstResult()} until another one is. */
+	private Object autoSelected;
 	private LocalResourceManager resources;
 	private Icons icons;
 	private boolean narrowLayout;
@@ -295,6 +298,8 @@ public class SearchView extends ViewPart {
 		boolean shown;
 		/** The matches in the files expanded so far, at most {@link #AUTO_EXPAND_LIMIT}. */
 		int expandedMatches;
+		/** Set by Enter in the search field before the results were there, the selected one opens once they are. */
+		boolean openWhenDone;
 		Job job;
 
 		SearchSession(SearchQuery query, Pattern pattern, WorkspaceSearchScope scope, boolean narrowed) {
@@ -842,13 +847,40 @@ public class SearchView extends ViewPart {
 		replaceAllItem.addListener(SWT.Selection, e -> replaceAll(true));
 
 		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
-		searchText.addListener(SWT.DefaultSelection, e -> scheduleSearch(0));
-		// ↑ and ↓ browse the recent searches like in a terminal, the focus stays in the field
-		searchText.addListener(SWT.KeyDown, e -> {
-			if ((e.stateMask & SWT.MODIFIER_MASK) == 0 && (e.keyCode == SWT.ARROW_UP && searchHistory.showOlder()
-					|| e.keyCode == SWT.ARROW_DOWN && searchHistory.showNewer())) {
-				e.doit = false;
+		// Enter opens the selected result like in Open Resource, the clear button only clears the field
+		searchText.addListener(SWT.DefaultSelection, e -> {
+			if (e.detail == SWT.ICON_CANCEL) {
+				scheduleSearch(0);
+			} else {
+				openFromSearchField();
 			}
+		});
+		// ↑ and ↓ move through the results while the focus stays in the field, Alt+↑ and Alt+↓ (Option on macOS)
+		// browse the recent searches like in a terminal
+		searchText.addListener(SWT.KeyDown, e -> {
+			int modifiers = e.stateMask & SWT.MODIFIER_MASK;
+			if (modifiers == SWT.ALT && (e.keyCode == SWT.ARROW_UP || e.keyCode == SWT.ARROW_DOWN)) {
+				e.doit = false;
+				if (e.keyCode == SWT.ARROW_UP) {
+					searchHistory.showOlder();
+				} else {
+					searchHistory.showNewer();
+				}
+				return;
+			}
+			if (modifiers != 0) {
+				return;
+			}
+			switch (e.keyCode) {
+				case SWT.ARROW_DOWN -> moveSelection(1);
+				case SWT.ARROW_UP -> moveSelection(-1);
+				case SWT.PAGE_DOWN -> moveSelection(resultsPerPage());
+				case SWT.PAGE_UP -> moveSelection(-resultsPerPage());
+				default -> {
+					return;
+				}
+			}
+			e.doit = false;
 		});
 		replaceText.addModifyListener(e -> scheduleLabelRefresh());
 		replaceText.addListener(SWT.KeyDown, e -> {
@@ -1176,6 +1208,9 @@ public class SearchView extends ViewPart {
 				display.timerExec(-1, fileRefreshTrigger);
 				display.timerExec(FILE_REFRESH_DELAY_MS, fileRefreshTrigger);
 			}
+			if (s.openWhenDone) {
+				openSelectedResult();
+			}
 		} else {
 			display.timerExec(UPDATE_INTERVAL_MS, () -> pump(s));
 		}
@@ -1234,6 +1269,7 @@ public class SearchView extends ViewPart {
 			tree.setRedraw(true);
 			fitColumn();
 		}
+		selectFirstResult();
 		editorMarks.scheduleUpdate();
 		updateSummary();
 	}
@@ -1606,6 +1642,143 @@ public class SearchView extends ViewPart {
 		} else if (first instanceof FileMatch fileMatch) {
 			viewer.setExpandedState(fileMatch, !viewer.getExpandedState(fileMatch));
 		}
+	}
+
+	/**
+	 * Opens the selected result, or the one selected once the search for the text in the field has its results.
+	 */
+	private void openFromSearchField() {
+		SearchSession s = session;
+		if (searchScheduled || s == null || !s.query.equals(currentQuery())) {
+			startSearch();
+			s = session;
+		}
+		if (s == null) {
+			return;
+		}
+		if (s.shown && !viewer.getSelection().isEmpty()) {
+			openSelectedResult();
+		} else {
+			s.openWhenDone = true;
+		}
+	}
+
+	/**
+	 * Opens the selected result in an editor and activates it, a file at its first match.
+	 */
+	private void openSelectedResult() {
+		if (viewer.getStructuredSelection().getFirstElement() instanceof FileMatch fileMatch
+				&& fileMatch.getMatchCount() > 0) {
+			open(fileMatch.getMatches().get(0), true);
+		} else {
+			openSelection(true);
+		}
+	}
+
+	/**
+	 * Keeps the first result selected like in Open Resource, so Enter in the search field opens it, until another one
+	 * is selected.
+	 */
+	private void selectFirstResult() {
+		IStructuredSelection selection = viewer.getStructuredSelection();
+		if (!selection.isEmpty() && (selection.size() > 1 || selection.getFirstElement() != autoSelected)) {
+			return;
+		}
+		TreeItem first = nextResult(viewer.getTree(), null);
+		autoSelected = first != null ? first.getData() : null;
+		if (autoSelected != null && autoSelected != selection.getFirstElement()) {
+			viewer.setSelection(new StructuredSelection(autoSelected), true);
+		}
+	}
+
+	/**
+	 * Selects the result the given number of rows below or above the selected one, the first one if none is.
+	 *
+	 * @param rows the rows to move, negative to move up
+	 */
+	private void moveSelection(int rows) {
+		Tree tree = viewer.getTree();
+		TreeItem[] selection = tree.getSelection();
+		TreeItem item = selection.length == 0 ? null : selection[rows < 0 ? 0 : selection.length - 1];
+		TreeItem target = null;
+		for (int i = 0; i < Math.abs(rows); i++) {
+			TreeItem next = rows > 0 ? nextResult(tree, item) : item != null ? previousResult(item) : null;
+			if (next == null) {
+				break;
+			}
+			target = item = next;
+		}
+		if (target == null) {
+			return;
+		}
+		SearchSession s = session;
+		if (s != null) {
+			s.openWhenDone = false;
+		}
+		viewer.setSelection(new StructuredSelection(target.getData()), true);
+	}
+
+	private int resultsPerPage() {
+		Tree tree = viewer.getTree();
+		return Math.max(1, tree.getClientArea().height / tree.getItemHeight() - 1);
+	}
+
+	/**
+	 * @return the result below the given one, the first one for {@code null}
+	 */
+	private static TreeItem nextResult(Tree tree, TreeItem item) {
+		TreeItem next = item != null ? nextVisible(item) : tree.getItemCount() > 0 ? tree.getItem(0) : null;
+		while (next != null && !isResult(next)) {
+			next = nextVisible(next);
+		}
+		return next;
+	}
+
+	private static TreeItem previousResult(TreeItem item) {
+		TreeItem previous = previousVisible(item);
+		while (previous != null && !isResult(previous)) {
+			previous = previousVisible(previous);
+		}
+		return previous;
+	}
+
+	/**
+	 * @return whether Enter opens the row, the row of a file is skipped while its matches are shown below it
+	 */
+	private static boolean isResult(TreeItem item) {
+		return item.getData() != null && !(item.getData() instanceof FileMatch && item.getExpanded());
+	}
+
+	private static TreeItem nextVisible(TreeItem item) {
+		if (item.getExpanded() && item.getItemCount() > 0) {
+			return item.getItem(0);
+		}
+		for (TreeItem current = item; current != null; current = current.getParentItem()) {
+			TreeItem[] siblings = siblings(current);
+			int index = Arrays.asList(siblings).indexOf(current);
+			if (index + 1 < siblings.length) {
+				return siblings[index + 1];
+			}
+		}
+		return null;
+	}
+
+	private static TreeItem previousVisible(TreeItem item) {
+		TreeItem[] siblings = siblings(item);
+		int index = Arrays.asList(siblings).indexOf(item);
+		if (index == 0) {
+			return item.getParentItem();
+		}
+		TreeItem previous = siblings[index - 1];
+		while (previous.getExpanded() && previous.getItemCount() > 0) {
+			previous = previous.getItem(previous.getItemCount() - 1);
+		}
+		return previous;
+	}
+
+	private static TreeItem[] siblings(TreeItem item) {
+		TreeItem parent = item.getParentItem();
+		return parent != null ? parent.getItems() : item.getParent().getItems();
 	}
 
 	private void open(LineMatch match, boolean activate) {

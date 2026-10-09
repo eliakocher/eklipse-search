@@ -124,7 +124,8 @@ final class EmptyState {
 		String alt = Util.isMac() ? "⌥" : "Alt+";
 		String ctrl = Util.isMac() ? "⌘" : "Ctrl+";
 		return List.of("Select text in an editor before opening the view to search for it.",
-				"↑ and ↓ in the search field browse your last searches.",
+				"Enter in the search field opens the first result, ↓ and ↑ pick another one.",
+				alt + "↑ and " + alt + "↓ in the search field browse your last searches.",
 				alt + "C, " + alt + "W and " + alt + "R toggle match case, whole word and regex.",
 				"Click a result to preview it, double-click to open it.",
 				"Delete hides a result until the next search.",
