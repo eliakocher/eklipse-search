@@ -1157,6 +1157,12 @@ public class SearchView extends ViewPart {
 			updateSummary();
 			updateSelectionActions();
 			searchHistory.searched(s.query.text());
+			// the search may have read these files before they changed, see resourceChanged
+			if (!s.changedFiles.isEmpty()) {
+				pendingRefresh.addAll(s.changedFiles);
+				display.timerExec(-1, fileRefreshTrigger);
+				display.timerExec(FILE_REFRESH_DELAY_MS, fileRefreshTrigger);
+			}
 		} else {
 			display.timerExec(UPDATE_INTERVAL_MS, () -> pump(s));
 		}
@@ -1515,34 +1521,41 @@ public class SearchView extends ViewPart {
 		}
 		Map<IFile, List<LineMatch>> byFile = groupByFile(found);
 		preview.invalidate(files);
+		// the tree is changed at once, see dismissSelection
+		List<Object> removed = new ArrayList<>();
+		List<FileMatch> added = new ArrayList<>();
+		List<FileMatch> expand = new ArrayList<>();
+		for (IFile file : files) {
+			FileMatch old = result.get(file);
+			boolean expanded = old == null || viewer.getExpandedState(old);
+			if (old != null) {
+				result.remove(file);
+				removed.add(old);
+			}
+			// a deleted file can't be opened from its name anymore either
+			FileNameMatch name = file.exists() ? null : result.removeNameMatch(file);
+			if (name != null) {
+				removed.add(name);
+			}
+			List<LineMatch> matches = byFile.get(file);
+			if (matches == null) {
+				continue;
+			}
+			FileMatch fileMatch = null;
+			for (LineMatch match : matches) {
+				fileMatch = result.add(match);
+			}
+			added.add(fileMatch);
+			if (expanded) {
+				expand.add(fileMatch);
+			}
+		}
 		Tree tree = viewer.getTree();
 		tree.setRedraw(false);
 		try {
-			List<FileMatch> expand = new ArrayList<>();
-			for (IFile file : files) {
-				FileMatch old = result.get(file);
-				boolean expanded = old == null || viewer.getExpandedState(old);
-				if (old != null) {
-					result.remove(file);
-					viewer.remove(old);
-				}
-				// a deleted file can't be opened from its name anymore either
-				FileNameMatch name = file.exists() ? null : result.removeNameMatch(file);
-				if (name != null) {
-					viewer.remove(name);
-				}
-				List<LineMatch> matches = byFile.get(file);
-				if (matches == null) {
-					continue;
-				}
-				FileMatch fileMatch = null;
-				for (LineMatch match : matches) {
-					fileMatch = result.add(match);
-				}
-				viewer.add(result, fileMatch);
-				if (expanded) {
-					expand.add(fileMatch);
-				}
+			viewer.remove(removed.toArray());
+			if (!added.isEmpty()) {
+				viewer.add(result, added.toArray());
 			}
 			viewer.expandFiles(expand);
 		} finally {
@@ -1620,31 +1633,38 @@ public class SearchView extends ViewPart {
 			return;
 		}
 		List<Object> candidates = selectionCandidatesAfterRemoval(selection);
+		// removed from the tree at once: every removal saves and restores the selection, removing one element after
+		// the other took minutes for a few thousand selected results
+		List<Object> removed = new ArrayList<>();
+		Set<FileMatch> shrunk = new LinkedHashSet<>();
+		for (Object element : selection) {
+			if (element instanceof FileMatch fileMatch) {
+				if (result.remove(fileMatch.getFile()) != null) {
+					removed.add(fileMatch);
+				}
+			} else if (element instanceof FileNameMatch nameMatch) {
+				if (result.removeNameMatch(nameMatch.getFile()) != null) {
+					removed.add(nameMatch);
+				}
+			} else if (element instanceof LineMatch match) {
+				FileMatch parent = result.get(match.getFile());
+				if (parent == null) {
+					continue;
+				}
+				if (result.remove(match)) {
+					removed.add(parent);
+				} else {
+					removed.add(match);
+					shrunk.add(parent);
+				}
+			}
+		}
 		Tree tree = viewer.getTree();
 		tree.setRedraw(false);
 		try {
-			for (Object element : selection) {
-				if (element instanceof FileMatch fileMatch) {
-					if (result.remove(fileMatch.getFile()) != null) {
-						viewer.remove(fileMatch);
-					}
-				} else if (element instanceof FileNameMatch nameMatch) {
-					if (result.removeNameMatch(nameMatch.getFile()) != null) {
-						viewer.remove(nameMatch);
-					}
-				} else if (element instanceof LineMatch match) {
-					FileMatch parent = result.get(match.getFile());
-					if (parent == null) {
-						continue;
-					}
-					if (result.remove(match)) {
-						viewer.remove(parent);
-					} else {
-						viewer.remove(match);
-						viewer.update(parent, null);
-					}
-				}
-			}
+			viewer.remove(removed.toArray());
+			// the match counts, a file removed after all its matches were is ignored
+			viewer.update(shrunk.toArray(), null);
 		} finally {
 			tree.setRedraw(true);
 			fitColumn();
@@ -1796,13 +1816,34 @@ public class SearchView extends ViewPart {
 		display.timerExec(LABEL_REFRESH_DELAY_MS, labelRefreshTrigger);
 	}
 
+	/**
+	 * Updates the labels of the matches, the only ones showing the replacement and the context before the match. A
+	 * refresh of the whole tree would also fetch and sort all files again, which made typing a replacement lag with
+	 * thousands of expanded results.
+	 */
 	private void refreshLabels() {
-		if (!isDisposed()) {
-			viewer.refresh(true);
-			fitColumn();
-			// the label provider doesn't redraw cells itself
-			viewer.getTree().redraw();
+		if (isDisposed()) {
+			return;
 		}
+		Tree tree = viewer.getTree();
+		List<Object> matches = new ArrayList<>();
+		for (TreeItem file : tree.getItems()) {
+			// a file never expanded has a placeholder without data, its matches get the current labels once created
+			for (TreeItem item : file.getItems()) {
+				if (item.getData() instanceof LineMatch match) {
+					matches.add(match);
+				}
+			}
+		}
+		tree.setRedraw(false);
+		try {
+			viewer.update(matches.toArray(), null);
+		} finally {
+			tree.setRedraw(true);
+		}
+		fitColumn();
+		// the label provider doesn't redraw cells itself
+		tree.redraw();
 	}
 
 	void replaceAll(boolean confirm) {

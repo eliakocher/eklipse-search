@@ -1,5 +1,6 @@
 package com.eklipse.search.ui;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -15,9 +16,12 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jface.viewers.StructuredSelection;
+import org.eclipse.swt.SWT;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Tree;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
 import org.junit.jupiter.api.AfterEach;
@@ -115,6 +119,25 @@ class SearchViewPerformanceTest {
 		System.out.println("PERF expand all of " + view.getSummary() + ": total "
 				+ (System.nanoTime() - start) / 1_000_000 + " ms, longest UI freeze " + stallMs + " ms");
 		assertTrue(stallMs < MAX_ALLOWED_EXPAND_ALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	@Test
+	void dismissingManySelectedResultsKeepsTheUiResponsive() {
+		view.activateSearch("sendSms");
+		waitUntil(() -> !view.isSearching(), 60_000);
+		Tree tree = view.getViewer().getTree();
+		tree.selectAll();
+		int selected = tree.getSelectionCount();
+		Event delete = new Event();
+		delete.keyCode = SWT.DEL;
+
+		long start = System.nanoTime();
+		tree.notifyListeners(SWT.KeyDown, delete);
+		long dismissMs = (System.nanoTime() - start) / 1_000_000;
+		System.out.println("PERF dismiss " + selected + " selected results: " + dismissMs + " ms");
+		assertEquals(0, view.getResult().getMatchCount());
+		// SWT on macOS restores the whole selection for every disposed item: this took 3 minutes
+		assertTrue(dismissMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + dismissMs + " ms");
 	}
 
 	@Test

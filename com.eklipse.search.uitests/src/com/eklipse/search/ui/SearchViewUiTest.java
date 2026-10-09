@@ -185,6 +185,8 @@ class SearchViewUiTest {
 		}
 		view.getReplaceText().setText("text");
 		waitUntil(() -> false, 300);
+		TreeItem previewed = (TreeItem) view.getViewer().testFindItem(view.getResult().getAllMatches().get(0));
+		assertTrue(previewed.getText().contains("smstext"), "the replacement follows the match: " + previewed.getText());
 		screenshot(view.getRoot(), "3-replace-preview");
 
 		view.replaceAll(false);
