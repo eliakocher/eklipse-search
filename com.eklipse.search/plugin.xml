@@ -22,6 +22,33 @@
             categoryId="org.eclipse.search.ui.category.search"
             defaultHandler="com.eklipse.search.ui.OpenSearchViewHandler">
       </command>
+      <command
+            id="com.eklipse.search.clear"
+            name="Clear Eklipse Search"
+            description="Clears the search and replace text and the results of the Eklipse Search view"
+            categoryId="org.eclipse.search.ui.category.search">
+      </command>
+      <command
+            id="com.eklipse.search.expandAll"
+            name="Expand All Eklipse Search Results"
+            categoryId="org.eclipse.search.ui.category.search">
+      </command>
+      <command
+            id="com.eklipse.search.collapseAll"
+            name="Collapse All Eklipse Search Results"
+            categoryId="org.eclipse.search.ui.category.search">
+      </command>
+   </extension>
+
+   <extension
+         point="org.eclipse.ui.contexts">
+      <!-- active while the view is: its bindings win over the window's ones there, and only there -->
+      <context
+            id="com.eklipse.search.context"
+            name="In Eklipse Search"
+            description="The Eklipse Search view is active"
+            parentId="org.eclipse.ui.contexts.window">
+      </context>
    </extension>
 
    <extension
@@ -32,6 +59,25 @@
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
             contextId="org.eclipse.ui.contexts.window"
             sequence="M1+M2+M3+F">
+      </key>
+      <!-- Cmd+Shift+Backspace / Cmd+= / Cmd+- on macOS, Ctrl elsewhere; Cmd+= and Cmd+- zoom in text editors only -->
+      <key
+            commandId="com.eklipse.search.clear"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            contextId="com.eklipse.search.context"
+            sequence="M1+M2+BS">
+      </key>
+      <key
+            commandId="com.eklipse.search.expandAll"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            contextId="com.eklipse.search.context"
+            sequence="M1+=">
+      </key>
+      <key
+            commandId="com.eklipse.search.collapseAll"
+            schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+            contextId="com.eklipse.search.context"
+            sequence="M1+-">
       </key>
    </extension>
 

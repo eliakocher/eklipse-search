@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.resources.IFile;
@@ -60,8 +61,26 @@ public final class TextSearcher {
 	 */
 	public static Result search(TextSearchScope scope, Pattern pattern, int maxResults, Consumer<LineMatch> collector,
 			IProgressMonitor monitor) {
+		return search(scope, pattern, maxResults, collector, null, monitor);
+	}
+
+	/**
+	 * Searches all files of a scope, also matching the pattern against the file names.
+	 *
+	 * @param scope the files to search
+	 * @param pattern the pattern to search for
+	 * @param maxResults the number of matches after which the search stops
+	 * @param collector receives the matches, called from several threads
+	 * @param names receives the files whose name matches, {@code null} to not look at the names; called from several
+	 *        threads
+	 * @param monitor the monitor used for cancellation
+	 * @return the outcome of the search
+	 * @throws OperationCanceledException if {@code monitor} was canceled
+	 */
+	public static Result search(TextSearchScope scope, Pattern pattern, int maxResults, Consumer<LineMatch> collector,
+			Consumer<FileNameMatch> names, IProgressMonitor monitor) {
 		return run((requestor, searchMonitor) -> TextSearchEngine.create().search(scope, requestor, pattern,
-				searchMonitor), maxResults, collector, monitor);
+				searchMonitor), pattern, maxResults, collector, names, monitor);
 	}
 
 	/**
@@ -77,17 +96,36 @@ public final class TextSearcher {
 	 */
 	public static Result search(IFile[] files, Pattern pattern, int maxResults, Consumer<LineMatch> collector,
 			IProgressMonitor monitor) {
+		return search(files, pattern, maxResults, collector, null, monitor);
+	}
+
+	/**
+	 * Searches the given files, also matching the pattern against their names.
+	 *
+	 * @param files the files to search
+	 * @param pattern the pattern to search for
+	 * @param maxResults the number of matches after which the search stops
+	 * @param collector receives the matches, called from several threads
+	 * @param names receives the files whose name matches, {@code null} to not look at the names; called from several
+	 *        threads
+	 * @param monitor the monitor used for cancellation
+	 * @return the outcome of the search
+	 * @throws OperationCanceledException if {@code monitor} was canceled
+	 */
+	public static Result search(IFile[] files, Pattern pattern, int maxResults, Consumer<LineMatch> collector,
+			Consumer<FileNameMatch> names, IProgressMonitor monitor) {
 		return run((requestor, searchMonitor) -> TextSearchEngine.create().search(files, requestor, pattern,
-				searchMonitor), maxResults, collector, monitor);
+				searchMonitor), pattern, maxResults, collector, names, monitor);
 	}
 
 	private interface EngineCall {
 		IStatus search(TextSearchRequestor requestor, IProgressMonitor monitor);
 	}
 
-	private static Result run(EngineCall call, int maxResults, Consumer<LineMatch> collector, IProgressMonitor monitor) {
+	private static Result run(EngineCall call, Pattern pattern, int maxResults, Consumer<LineMatch> collector,
+			Consumer<FileNameMatch> names, IProgressMonitor monitor) {
 		IProgressMonitor callerMonitor = monitor != null ? monitor : new NullProgressMonitor();
-		Requestor requestor = new Requestor(maxResults, collector, callerMonitor);
+		Requestor requestor = new Requestor(pattern, maxResults, collector, names, callerMonitor);
 		// the engine only stops through cancellation; reaching the limit must not cancel the caller's monitor
 		IProgressMonitor searchMonitor = new ProgressMonitorWrapper(callerMonitor) {
 			@Override
@@ -157,17 +195,41 @@ public final class TextSearcher {
 
 	private static final class Requestor extends TextSearchRequestor {
 
+		private final Pattern pattern;
 		private final int maxResults;
 		private final Consumer<LineMatch> collector;
+		private final Consumer<FileNameMatch> names;
 		private final IProgressMonitor monitor;
 		private final AtomicInteger count = new AtomicInteger();
 		private final Map<IFile, LineCounter> lineCounters = new ConcurrentHashMap<>();
 		private volatile boolean limitReached;
 
-		Requestor(int maxResults, Consumer<LineMatch> collector, IProgressMonitor monitor) {
+		Requestor(Pattern pattern, int maxResults, Consumer<LineMatch> collector, Consumer<FileNameMatch> names,
+				IProgressMonitor monitor) {
+			this.pattern = pattern;
 			this.maxResults = maxResults;
 			this.collector = collector;
+			this.names = names;
 			this.monitor = monitor;
+		}
+
+		/**
+		 * Called for every file in the scope before its content is searched, so matching the names needs no walk of
+		 * its own through the workspace.
+		 */
+		@Override
+		public boolean acceptFile(IFile file) {
+			if (names != null && !monitor.isCanceled()) {
+				Matcher matcher = pattern.matcher(file.getName());
+				// a regex like a* also matches nothing, that's no reason to list every file
+				while (matcher.find()) {
+					if (matcher.end() > matcher.start()) {
+						names.accept(new FileNameMatch(file, matcher.start(), matcher.end()));
+						break;
+					}
+				}
+			}
+			return true;
 		}
 
 		@Override

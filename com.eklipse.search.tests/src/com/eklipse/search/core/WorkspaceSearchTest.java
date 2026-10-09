@@ -120,6 +120,20 @@ class WorkspaceSearchTest {
 	}
 
 	@Test
+	void fileNamesMatchInTheSameScope() {
+		SearchQuery query = new SearchQuery("JAVA", false, false, false, "", "node_modules", true);
+		List<String> names = Collections.synchronizedList(new ArrayList<>());
+
+		TextSearcher.search(WorkspaceSearchScope.of(query), query.createPattern(), 1000, match -> {
+		}, name -> names.add(name.getFile().getFullPath().makeRelative() + ":" + name.getStart() + "-" + name.getEnd()),
+				new NullProgressMonitor());
+
+		// not the derived target/Gen.java, Nested.java once
+		names.sort(null);
+		assertEquals(List.of("search-nested/Nested.java:7-11", "search-test/src/Foo.java:4-8"), names);
+	}
+
+	@Test
 	void limitStopsTheSearch() {
 		SearchQuery query = new SearchQuery("o", false, false, false, "", "", true);
 		List<LineMatch> matches = Collections.synchronizedList(new ArrayList<>());

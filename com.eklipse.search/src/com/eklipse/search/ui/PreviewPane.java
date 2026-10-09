@@ -98,7 +98,10 @@ final class PreviewPane {
 	private int targetStart = -1;
 	private int targetEnd = -1;
 
+	/** The match to center and box, {@code null} to show the file from the start. */
 	private LineMatch target;
+	/** The file to show, also while it's loading. */
+	private IFile targetFile;
 	private List<LineMatch> matches = List.of();
 	/** The marked matches in the shown document, sorted and without overlaps. */
 	private StyleRange[] marks = {};
@@ -184,10 +187,24 @@ final class PreviewPane {
 	 * @param fileMatches all matches of the file, to mark them
 	 */
 	void show(LineMatch match, List<LineMatch> fileMatches) {
+		show(match.getFile(), match, fileMatches);
+	}
+
+	/**
+	 * Shows a file from its start, e.g. one found by its name.
+	 *
+	 * @param file the file
+	 * @param fileMatches all matches of the file, to mark them
+	 */
+	void show(IFile file, List<LineMatch> fileMatches) {
+		show(file, null, fileMatches);
+	}
+
+	private void show(IFile file, LineMatch match, List<LineMatch> fileMatches) {
 		request++;
 		target = match;
+		targetFile = file;
 		matches = List.copyOf(fileMatches);
-		IFile file = match.getFile();
 		String content = openContent(file);
 		if (content == null && file.equals(cachedFile) && file.getModificationStamp() == cachedStamp) {
 			content = cachedContent;
@@ -310,7 +327,7 @@ final class PreviewPane {
 		boolean targetValid = isAt(content, match);
 		PreviewText preview = PreviewText.create(content, targetValid ? match.getOffset() : -1, MAX_LINE_LENGTH);
 		StyleRange[] newMarks = createMarks(content, preview);
-		IFile file = match.getFile();
+		IFile file = targetFile;
 		IDocument document = viewer.getDocument();
 		if (document != null && file.equals(shownFile) && document.get().equals(preview.text())) {
 			updateMarks(newMarks);
@@ -327,7 +344,7 @@ final class PreviewPane {
 
 		try {
 			int line = targetStart >= 0 ? document.getLineOfOffset(targetStart)
-					: Math.min(match.getLineNumber() - 1, document.getNumberOfLines() - 1);
+					: match != null ? Math.min(match.getLineNumber() - 1, document.getNumberOfLines() - 1) : 0;
 			targetLineOffset = document.getLineOffset(line);
 		} catch (BadLocationException e) {
 			targetLineOffset = -1;

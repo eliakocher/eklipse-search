@@ -124,13 +124,14 @@ final class EmptyState {
 		String alt = Util.isMac() ? "⌥" : "Alt+";
 		String ctrl = Util.isMac() ? "⌘" : "Ctrl+";
 		return List.of("Select text in an editor before opening the view to search for it.",
-				"↓ in the search field jumps into the results.",
+				"↑ and ↓ in the search field browse your last searches.",
 				alt + "C, " + alt + "W and " + alt + "R toggle match case, whole word and regex.",
 				"Click a result to preview it, double-click to open it.",
 				"Delete hides a result until the next search.",
 				ctrl + "C copies the selected results with their line numbers.",
 				(Util.isMac() ? "⌘↩" : "Ctrl+Enter") + " in the replace field replaces all matches.",
-				"Include src/main/** to leave out the tests.");
+				"Include src/main/** to leave out the tests.",
+				"* matches any text: final*size finds final int size, \\* a star.");
 	}
 
 	/**
@@ -231,8 +232,8 @@ final class EmptyState {
 	}
 
 	/**
-	 * A magnifier over two lines of text, the second one underlined like a spelling mistake, or over nothing but the
-	 * spelling mistake.
+	 * A magnifier over two lines of text, the second one underlined like a spelling mistake, or over a red X when
+	 * nothing was found.
 	 */
 	private static void drawIcon(GC gc, int x, int y, Color color, boolean text) {
 		int radius = 22;
@@ -246,23 +247,30 @@ final class EmptyState {
 		gc.setLineWidth(8);
 		gc.drawLine(cx + handleStart, cy + handleStart, x + ICON_SIZE - 6, y + ICON_SIZE - 6);
 
-		int squiggleY = cy;
-		if (text) {
-			gc.setLineWidth(3);
-			gc.drawLine(cx - 11, cy - 6, cx + 11, cy - 6);
-			gc.drawLine(cx - 11, cy + 3, cx + 7, cy + 3);
-			squiggleY = cy + 8;
-		}
 		Color error = JFaceResources.getColorRegistry().get(JFacePreferences.ERROR_COLOR);
-		gc.setForeground(error != null ? error : gc.getDevice().getSystemColor(SWT.COLOR_RED));
-		gc.setLineWidth(2);
-		int[] squiggle = new int[14];
-		int left = text ? cx - 11 : cx - 9;
-		for (int i = 0; i < squiggle.length / 2; i++) {
-			squiggle[2 * i] = left + 3 * i;
-			squiggle[2 * i + 1] = squiggleY + (i % 2 == 0 ? 0 : 3);
+		Color red = error != null ? error : gc.getDevice().getSystemColor(SWT.COLOR_RED);
+		if (text) {
+			// both lines and the squiggle as wide, 8 zigzags of 3 pixels; the thicker lines end a pixel earlier, their
+			// round caps reach further
+			int half = 12;
+			gc.setLineWidth(3);
+			gc.drawLine(cx - half, cy - 6, cx + half - 1, cy - 6);
+			gc.drawLine(cx - half, cy + 3, cx + half - 1, cy + 3);
+			gc.setForeground(red);
+			gc.setLineWidth(2);
+			int[] squiggle = new int[2 * (2 * half / 3 + 1)];
+			for (int i = 0; i < squiggle.length / 2; i++) {
+				squiggle[2 * i] = cx - half + 3 * i;
+				squiggle[2 * i + 1] = cy + (i % 2 == 0 ? 8 : 11);
+			}
+			gc.drawPolyline(squiggle);
+		} else {
+			int arm = 8;
+			gc.setForeground(red);
+			gc.setLineWidth(4);
+			gc.drawLine(cx - arm, cy - arm, cx + arm, cy + arm);
+			gc.drawLine(cx - arm, cy + arm, cx + arm, cy - arm);
 		}
-		gc.drawPolyline(squiggle);
 		gc.setLineCap(SWT.CAP_FLAT);
 	}
 

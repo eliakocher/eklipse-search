@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import org.eclipse.core.commands.operations.OperationHistoryFactory;
 import org.eclipse.core.resources.IContainer;
@@ -51,6 +52,7 @@ import org.eclipse.swt.graphics.ImageData;
 import org.eclipse.swt.graphics.ImageLoader;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.Rectangle;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
@@ -70,6 +72,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.eklipse.search.core.FileMatch;
+import com.eklipse.search.core.FileNameMatch;
 import com.eklipse.search.core.LineMatch;
 
 /**
@@ -146,7 +149,7 @@ class SearchViewUiTest {
 		view.getCaseItem().setSelection(false);
 		view.getRegexAction().setChecked(false);
 		view.getReplaceText().setText("");
-		view.getIncludeText().setText("");
+		view.getIncludeField().setText("");
 		view.getSearchText().setText("");
 		view.setPreviewVisible(true);
 		processEvents();
@@ -166,8 +169,10 @@ class SearchViewUiTest {
 		screenshot(view.getRoot(), "0-empty");
 		view.activateSearch("sms");
 		waitForSearch();
-		assertEquals("16 results in 3 files", view.getSummary());
+		assertEquals("1 file name, 16 results in 3 files", view.getSummary());
 		assertTrue(view.getViewer().getTree().isVisible());
+		Object first = view.getViewer().getTree().getItem(0).getData();
+		assertEquals("SmsSender.java", ((FileNameMatch) first).getFile().getName(), "found by its name, on top");
 		screenshot(view.getRoot(), "1-search");
 
 		toggle(view.getCaseItem());
@@ -249,9 +254,9 @@ class SearchViewUiTest {
 		screenshot(view.getRoot(), "5-sidebar-empty");
 		view.activateSearch("sms");
 		waitForSearch();
-		assertEquals("16 results in 3 files", view.getSummary());
-		Rectangle include = view.getIncludeText().getBounds();
-		Rectangle exclude = view.getExcludeText().getBounds();
+		assertEquals("1 file name, 16 results in 3 files", view.getSummary());
+		Rectangle include = view.getIncludeField().getBounds();
+		Rectangle exclude = view.getExcludeField().getBounds();
 		assertEquals(include.x, exclude.x, "include and exclude start at the same edge");
 		assertEquals(include.width, exclude.width, "include and exclude end at the same edge");
 		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
@@ -403,7 +408,7 @@ class SearchViewUiTest {
 
 	@Test
 	void remembersTheRecentFilters() throws Exception {
-		Text include = view.getIncludeText();
+		Combo include = view.getIncludeField();
 		// typing isn't remembered, leaving the field or Enter is
 		for (String value : new String[] { "*.j", "*.ja", "*.java" }) {
 			include.setText(value);
@@ -421,6 +426,50 @@ class SearchViewUiTest {
 		page.hideView(view);
 		view = (SearchView) page.showView(SearchView.ID);
 		assertEquals(entries, view.getIncludeHistory().getEntries());
+	}
+
+	@Test
+	void browsesTheRecentSearchesWithTheArrowKeys() {
+		Text search = view.getSearchText();
+		for (String value : new String[] { "sms", "sendSms" }) {
+			search.setText(value);
+			search.notifyListeners(SWT.DefaultSelection, new Event());
+		}
+		// ↑ skips the search just made
+		assertEquals("sms", press(search, SWT.ARROW_UP));
+		assertEquals("sendSms", press(search, SWT.ARROW_DOWN));
+
+		search.setText("typed");
+		assertEquals("sendSms", press(search, SWT.ARROW_UP));
+		assertEquals("sms", press(search, SWT.ARROW_UP));
+		assertEquals("sendSms", press(search, SWT.ARROW_DOWN));
+		assertEquals("typed", press(search, SWT.ARROW_DOWN));
+	}
+
+	@Test
+	void remembersTheSearchesThatAreDone() {
+		Supplier<List<String>> history = () -> view.getSearchHistory().getEntries();
+		view.activateSearch("sendS");
+		waitUntil(() -> history.get().indexOf("sendS") == 0, 10_000);
+		view.activateSearch("sendSms");
+		waitUntil(() -> history.get().indexOf("sendSms") == 0, 10_000);
+		assertFalse(history.get().contains("sendS"), "replaced while typing on");
+
+		// leaving the field keeps it
+		view.getSearchText().notifyListeners(SWT.FocusOut, new Event());
+		view.activateSearch("sendSmsTo");
+		waitUntil(() -> history.get().indexOf("sendSmsTo") == 0, 10_000);
+		assertEquals(List.of("sendSmsTo", "sendSms"), history.get().subList(0, 2));
+	}
+
+	/**
+	 * @return the text after the key
+	 */
+	private static String press(Text text, int keyCode) {
+		Event event = new Event();
+		event.keyCode = keyCode;
+		text.notifyListeners(SWT.KeyDown, event);
+		return text.getText();
 	}
 
 	@Test
@@ -485,7 +534,7 @@ class SearchViewUiTest {
 		document(hiddenEditor).set("class Hidden {}\n");
 		view.activateSearch("sms");
 		waitForSearch();
-		assertEquals("16 results in 3 files", view.getSummary());
+		assertEquals("1 file name, 16 results in 3 files", view.getSummary());
 		assertFalse(view.isNarrowed());
 
 		// changes the narrowing search must see although these files had no matches: a new file, unsaved typing in

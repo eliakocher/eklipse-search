@@ -29,6 +29,7 @@ import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.ui.model.WorkbenchLabelProvider;
 
 import com.eklipse.search.core.FileMatch;
+import com.eklipse.search.core.FileNameMatch;
 import com.eklipse.search.core.LineMatch;
 
 /**
@@ -47,9 +48,12 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	/** How much of the text color is mixed into the background for the selection, with and without the focus. */
 	private static final double FOCUSED_SELECTION = 0.2;
 	private static final double SELECTION = 0.12;
+	/** How much of the text color is in the line between the files found by their name and the other results. */
+	private static final double SEPARATOR = 0.3;
 
 	private final Function<LineMatch, String> replacementPreview;
 	private final IntSupplier contextChars;
+	private final IntSupplier nameMatchCount;
 	private final WorkbenchLabelProvider workbenchLabels = new WorkbenchLabelProvider();
 	private final Map<String, Image> fileImages = new HashMap<>();
 	private final Styler matchStyler = background(MATCH_HIGHLIGHT, false);
@@ -61,13 +65,16 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	/**
 	 * @param replacementPreview returns the replacement to preview for a match, {@code null} for no preview
 	 * @param contextChars returns how many characters before a match fit into the view
+	 * @param nameMatchCount returns how many files were found by their name, they are the first ones in the tree
 	 * @param pathFont the font of the folder after a file name
 	 */
-	ResultLabelProvider(Function<LineMatch, String> replacementPreview, IntSupplier contextChars, Font pathFont) {
+	ResultLabelProvider(Function<LineMatch, String> replacementPreview, IntSupplier contextChars,
+			IntSupplier nameMatchCount, Font pathFont) {
 		// the selection is painted here, in a gray the match highlight works on
 		super(COLORS_ON_SELECTION);
 		this.replacementPreview = replacementPreview;
 		this.contextChars = contextChars;
+		this.nameMatchCount = nameMatchCount;
 		this.pathFont = pathFont;
 	}
 
@@ -82,7 +89,9 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		StyledString text = getStyledText(element);
 		cell.setText(text.getString());
 		cell.setStyleRanges(text.getStyleRanges());
-		cell.setImage(element instanceof FileMatch fileMatch ? fileImage(fileMatch.getFile()) : null);
+		IFile file = element instanceof FileMatch fileMatch ? fileMatch.getFile()
+				: element instanceof FileNameMatch nameMatch ? nameMatch.getFile() : null;
+		cell.setImage(file != null ? fileImage(file) : null);
 	}
 
 	/**
@@ -101,6 +110,13 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			// the count comes before the path, so it stays visible when a narrow view cuts the path
 			StyledString text = new StyledString(file.getName());
 			text.append(" " + fileMatch.getMatchCount(), StyledString.COUNTER_STYLER);
+			text.append(PATH_SEPARATOR + folder(file), StyledString.QUALIFIER_STYLER);
+			return text;
+		}
+		if (element instanceof FileNameMatch nameMatch) {
+			IFile file = nameMatch.getFile();
+			StyledString text = new StyledString(file.getName());
+			text.setStyle(nameMatch.getStart(), nameMatch.getEnd() - nameMatch.getStart(), matchStyler);
 			text.append(PATH_SEPARATOR + folder(file), StyledString.QUALIFIER_STYLER);
 			return text;
 		}
@@ -134,6 +150,9 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		if (element instanceof FileMatch fileMatch) {
 			return fileMatch.getFile().getFullPath().makeRelative().toString();
 		}
+		if (element instanceof FileNameMatch nameMatch) {
+			return nameMatch.getFile().getFullPath().makeRelative().toString();
+		}
 		return null;
 	}
 
@@ -165,7 +184,10 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	@Override
 	protected void paint(Event event, Object element) {
 		if (element instanceof FileMatch fileMatch) {
-			paintFile(event, fileMatch);
+			drawSeparator(event);
+			paintFile(event, fileMatch.getFile(), " " + fileMatch.getMatchCount(), -1, -1);
+		} else if (element instanceof FileNameMatch nameMatch) {
+			paintFile(event, nameMatch.getFile(), "", nameMatch.getStart(), nameMatch.getEnd());
 		} else {
 			super.paint(event, element);
 		}
@@ -174,8 +196,12 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	/**
 	 * Like {@code super.paint}, with the folder in a smaller font and shortened in the middle to fit: the project and
 	 * the innermost folders say more than the cut off end of a long path.
+	 *
+	 * @param count the number of matches after the name, empty for none
+	 * @param highlightStart the start of the part of the name to highlight, {@code -1} for none
+	 * @param highlightEnd the end of the part of the name to highlight
 	 */
-	private void paintFile(Event event, FileMatch fileMatch) {
+	private void paintFile(Event event, IFile file, String count, int highlightStart, int highlightEnd) {
 		TreeItem item = (TreeItem) event.item;
 		GC gc = event.gc;
 		Image image = item.getImage();
@@ -185,8 +211,7 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			gc.drawImage(image, area.x + Math.max(0, (area.width - size.width) / 2),
 					area.y + Math.max(0, (area.height - size.height) / 2));
 		}
-		IFile file = fileMatch.getFile();
-		String name = file.getName() + " " + fileMatch.getMatchCount() + PATH_SEPARATOR;
+		String name = file.getName() + count + PATH_SEPARATOR;
 		Rectangle textArea = item.getTextBounds(0);
 		Font font = gc.getFont();
 		int width = item.getParent().getClientArea().width - textArea.x - gc.textExtent(name).x;
@@ -204,12 +229,32 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		int countStart = file.getName().length() + 1;
 		int pathStart = name.length();
 		ColorRegistry colors = JFaceResources.getColorRegistry();
+		if (highlightStart >= 0) {
+			fileLayout.setStyle(new TextStyle(null, null, colors.get(MATCH_HIGHLIGHT)), highlightStart,
+					highlightEnd - 1);
+		}
 		fileLayout.setStyle(new TextStyle(null, colors.get(JFacePreferences.COUNTER_COLOR), null), countStart,
 				pathStart - 1);
 		fileLayout.setStyle(new TextStyle(pathFont, colors.get(JFacePreferences.QUALIFIER_COLOR), null), pathStart,
 				text.length() - 1);
 		fileLayout.draw(gc, textArea.x,
 				textArea.y + Math.max(0, (textArea.height - fileLayout.getBounds().height) / 2));
+	}
+
+	/**
+	 * A line above the first file with matches in its content, below the files found by their name.
+	 */
+	private void drawSeparator(Event event) {
+		int names = nameMatchCount.getAsInt();
+		TreeItem item = (TreeItem) event.item;
+		Tree tree = item.getParent();
+		if (names > 0 && names < tree.getItemCount() && tree.getItem(names) == item) {
+			GC gc = event.gc;
+			Color foreground = gc.getForeground();
+			gc.setForeground(mix(tree, SEPARATOR));
+			gc.drawLine(0, event.y, tree.getClientArea().width, event.y);
+			gc.setForeground(foreground);
+		}
 	}
 
 	private static String folder(IFile file) {

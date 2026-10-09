@@ -45,6 +45,9 @@ import org.eclipse.jface.action.IMenuManager;
 import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.Separator;
+import org.eclipse.jface.bindings.keys.KeySequence;
+import org.eclipse.jface.bindings.keys.ParseException;
+import org.eclipse.jface.commands.ActionHandler;
 import org.eclipse.jface.dialogs.ErrorDialog;
 import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.layout.GridDataFactory;
@@ -73,6 +76,7 @@ import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.graphics.RGB;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
@@ -89,15 +93,19 @@ import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.ui.IActionBars;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IMemento;
+import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IViewSite;
 import org.eclipse.ui.IWorkbenchCommandConstants;
+import org.eclipse.ui.IWorkbenchPartReference;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.actions.ActionFactory;
-import org.eclipse.ui.actions.TextActionHandler;
+import org.eclipse.ui.contexts.IContextService;
+import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.ide.IDE;
 import org.eclipse.ui.ide.undo.WorkspaceUndoUtil;
+import org.eclipse.ui.keys.IBindingService;
 import org.eclipse.ui.operations.RedoActionHandler;
 import org.eclipse.ui.operations.UndoActionHandler;
 import org.eclipse.ui.part.ViewPart;
@@ -105,6 +113,7 @@ import org.eclipse.ui.progress.IWorkbenchSiteProgressService;
 import org.eclipse.ui.texteditor.ITextEditor;
 
 import com.eklipse.search.core.FileMatch;
+import com.eklipse.search.core.FileNameMatch;
 import com.eklipse.search.core.LineMatch;
 import com.eklipse.search.core.PreserveCase;
 import com.eklipse.search.core.ReplacementTemplate;
@@ -136,13 +145,19 @@ public class SearchView extends ViewPart {
 	/** Short enough to feel instant on a click, long enough to skip the results passed when holding an arrow key. */
 	private static final int PREVIEW_DELAY_MS = 50;
 	private static final int AUTO_EXPAND_LIMIT = 2_000;
+	/** Enough for the file looked for, few enough not to bury the matches in the content under file names. */
+	private static final int MAX_NAME_MATCHES = 10;
 	private static final int NARROW_WIDTH = 260;
 	private static final int MIN_PREVIEW_CONTEXT = 8;
 	private static final int MAX_PREVIEW_CONTEXT = 40;
 	/** Width taken by the tree's indentation and expand arrows before a match line starts. */
 	private static final int PREVIEW_INDENT = 40;
 	private static final String DEFAULT_INCLUDES = "*.java";
-	private static final String DEFAULT_EXCLUDES = "testbundle.*, **/node_modules";
+	private static final String DEFAULT_EXCLUDES = "testbundle.*, *.webapi.*, **/node_modules";
+	/** A view saved with it gets the current default, a value changed by hand stays. */
+	private static final String PREVIOUS_DEFAULT_EXCLUDES = "testbundle.*, **/node_modules";
+	/** The context of the view's key bindings, see {@link #activateShortcuts()}. */
+	private static final String CONTEXT_ID = "com.eklipse.search.context";
 	private static final int[] DEFAULT_PREVIEW_WEIGHTS = { 3, 2 };
 	private static final int SASH_WIDTH = 5;
 	/** How much of the text color is mixed into the background for the line between results and preview. */
@@ -152,6 +167,7 @@ public class SearchView extends ViewPart {
 	private static final String KEY_REPLACE = "replace";
 	private static final String KEY_INCLUDES = "includes";
 	private static final String KEY_EXCLUDES = "excludes";
+	private static final String KEY_SEARCH_HISTORY = "searchHistory";
 	private static final String KEY_INCLUDE_HISTORY = "includeHistory";
 	private static final String KEY_EXCLUDE_HISTORY = "excludeHistory";
 	private static final String KEY_CASE = "caseSensitive";
@@ -159,6 +175,8 @@ public class SearchView extends ViewPart {
 	private static final String KEY_REGEX = "regex";
 	private static final String KEY_PRESERVE_CASE = "preserveCase";
 	private static final String KEY_DERIVED = "excludeDerived";
+	private static final String KEY_WILDCARDS = "wildcards";
+	private static final String KEY_FILE_NAMES = "fileNames";
 	private static final String KEY_REPLACE_VISIBLE = "replaceVisible";
 	private static final String KEY_PREVIEW = "preview";
 	private static final String KEY_PREVIEW_WEIGHTS = "previewWeights";
@@ -171,10 +189,11 @@ public class SearchView extends ViewPart {
 
 	private Text searchText;
 	private Text replaceText;
-	private Text includeText;
-	private Text excludeText;
-	private FieldHistory includeHistory;
-	private FieldHistory excludeHistory;
+	private Combo includeField;
+	private Combo excludeField;
+	private SearchHistory searchHistory;
+	private ComboHistory includeHistory;
+	private ComboHistory excludeHistory;
 	private ToolItem replaceToggleItem;
 	private ToolItem caseItem;
 	private ToolItem wordItem;
@@ -199,6 +218,10 @@ public class SearchView extends ViewPart {
 	private Action previewAction;
 	private Action regexAction;
 	private Action derivedAction;
+	private Action wildcardAction;
+	private Action fileNamesAction;
+	private List<Shortcut> shortcuts;
+	private IPartListener2 activationListener;
 	private Action openAction;
 	private Action replaceSelectionAction;
 	private Action dismissAction;
@@ -227,6 +250,17 @@ public class SearchView extends ViewPart {
 	private final Runnable previewTrigger = this::updatePreview;
 
 	/**
+	 * An action with a key binding.
+	 *
+	 * @param action the action the key runs
+	 * @param text the label without the key
+	 * @param commandId the command the key runs
+	 * @param defaultKey the key the command is bound to by default, shown until the view is first active
+	 */
+	private record Shortcut(Action action, String text, String commandId, String defaultKey) {
+	}
+
+	/**
 	 * One run of the search. Matches are produced by worker threads and moved into the tree by the UI thread.
 	 */
 	private static final class SearchSession {
@@ -243,6 +277,7 @@ public class SearchView extends ViewPart {
 		volatile double totalWork;
 		final DoubleAdder worked = new DoubleAdder();
 		final ConcurrentLinkedQueue<LineMatch> incoming = new ConcurrentLinkedQueue<>();
+		final ConcurrentLinkedQueue<FileNameMatch> incomingNames = new ConcurrentLinkedQueue<>();
 		/** The files with matches, also those dismissed later. */
 		final Set<IFile> hitFiles = ConcurrentHashMap.newKeySet();
 		/** Files added or changed since the search started, a search narrowing this one must look at them again. */
@@ -289,6 +324,7 @@ public class SearchView extends ViewPart {
 		editorMarks = new EditorMatchMarks(getSite().getPage(), () -> result);
 		createActions();
 		contributeToActionBars();
+		activateShortcuts();
 		hookContextMenu();
 		restoreState();
 		hookListeners();
@@ -313,7 +349,8 @@ public class SearchView extends ViewPart {
 
 	private void createInputArea(Composite parent) {
 		resources = new LocalResourceManager(JFaceResources.getResources(), parent);
-		icons = new Icons(parent.getBackground().getRGB());
+		icons = new Icons(parent.getBackground().getRGB(),
+				parent.getDisplay().getSystemColor(SWT.COLOR_LIST_SELECTION).getRGB());
 		Composite area = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
 		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 0).applyTo(area);
@@ -330,13 +367,14 @@ public class SearchView extends ViewPart {
 
 		// a plain field like the replace field: the native macOS search field is almost invisible in the dark theme
 		searchText = createField(inputFields, "Search");
+		searchHistory = new SearchHistory(searchText);
 		optionsBar = createRowToolBar(inputFields);
 		caseItem = createToggle(optionsBar, overlayIcon("case_sensitive"), "Aa", "Match Case", 'C');
 		wordItem = createToggle(optionsBar, overlayIcon("whole_word"), "ab", "Match Whole Word", 'W');
 
 		replaceText = createField(inputFields, "Replace");
 		replaceBar = createRowToolBar(inputFields);
-		preserveCaseItem = createToggle(replaceBar, null, "AB", "Preserve Case", 'P');
+		preserveCaseItem = createToggle(replaceBar, icons.preserveCase(), "AB", "Preserve Case", 'P');
 		replaceAllItem = new ToolItem(replaceBar, SWT.PUSH);
 		setIcon(replaceAllItem, overlayIcon("replace_all"), "All");
 		replaceAllItem.setToolTipText("Replace All (" + (Util.isMac() ? "⌘↩" : "Ctrl+Enter") + ")");
@@ -344,6 +382,14 @@ public class SearchView extends ViewPart {
 
 	private void updateReplaceToggle(boolean expanded) {
 		replaceToggleItem.setImage(resources.create(icons.chevron(expanded)));
+	}
+
+	/**
+	 * Tells in the empty search field that a star matches any text, so searching one doesn't come as a surprise.
+	 */
+	private void updateSearchHint() {
+		boolean wildcards = wildcardAction.isChecked() && !regexAction.isChecked();
+		searchText.setMessage(wildcards ? "Search, * for any text" : "Search");
 	}
 
 	private static Text createField(Composite parent, String hint) {
@@ -359,11 +405,29 @@ public class SearchView extends ViewPart {
 		return bar;
 	}
 
+	/**
+	 * @param icon {@code null} for the compact text
+	 */
 	private ToolItem createToggle(ToolBar bar, ImageDescriptor icon, String text, String description, char key) {
 		ToolItem item = new ToolItem(bar, SWT.CHECK);
-		setIcon(item, icon, text);
+		if (icon != null) {
+			item.setData(new ImageDescriptor[] { icons.toggle(icon, false), icons.toggle(icon, true) });
+			updateToggle(item);
+			item.addListener(SWT.Selection, e -> updateToggle(item));
+		} else {
+			item.setText(text);
+		}
 		item.setToolTipText(description + " (" + (Util.isMac() ? "⌥" : "Alt+") + key + ")");
 		return item;
+	}
+
+	/**
+	 * Shows whether a toggle is on in its image, needed after changing its selection without an event.
+	 */
+	private void updateToggle(ToolItem item) {
+		if (item.getData() instanceof ImageDescriptor[] images) {
+			item.setImage(resources.create(images[item.getSelection() ? 1 : 0]));
+		}
 	}
 
 	/**
@@ -411,26 +475,22 @@ public class SearchView extends ViewPart {
 	private void createFilterArea(Composite parent) {
 		Composite area = new Composite(parent, SWT.NONE);
 		GridDataFactory.fillDefaults().grab(true, false).applyTo(area);
-		GridLayoutFactory.fillDefaults().numColumns(3).spacing(2, 4).applyTo(area);
+		GridLayoutFactory.fillDefaults().numColumns(2).spacing(2, 4).applyTo(area);
 		includeHistory = createFilterField(area, "Include:", "e.g. *.java, src/main/**");
-		includeText = includeHistory.getText();
+		includeField = includeHistory.getCombo();
 		excludeHistory = createFilterField(area, "Exclude:", "e.g. **/node_modules");
-		excludeText = excludeHistory.getText();
+		excludeField = excludeHistory.getCombo();
 	}
 
-	private FieldHistory createFilterField(Composite parent, String label, String hint) {
+	private ComboHistory createFilterField(Composite parent, String label, String hint) {
 		Label title = new Label(parent, SWT.NONE);
 		title.setText(label);
 		GridDataFactory.fillDefaults().align(SWT.BEGINNING, SWT.CENTER).applyTo(title);
-		Text text = new Text(parent, SWT.SINGLE | SWT.BORDER);
-		text.setMessage(hint);
-		text.setToolTipText(hint);
-		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).indent(2, 0).applyTo(text);
-		ToolBar bar = createRowToolBar(parent);
-		ToolItem dropDown = new ToolItem(bar, SWT.PUSH);
-		dropDown.setImage(resources.create(icons.chevron(true)));
-		dropDown.setToolTipText("Recently Used (↓)");
-		return new FieldHistory(text, dropDown);
+		// a combo box has no hint text, the tooltip gives the example
+		Combo combo = new Combo(parent, SWT.DROP_DOWN);
+		combo.setToolTipText(hint);
+		GridDataFactory.fillDefaults().grab(true, false).align(SWT.FILL, SWT.CENTER).indent(2, 0).applyTo(combo);
+		return new ComboHistory(combo);
 	}
 
 	private void createSummary(Composite parent) {
@@ -462,8 +522,8 @@ public class SearchView extends ViewPart {
 		// a single column kept as wide as the view; without it the tree grows to the longest line and scrolls sideways
 		TreeViewerColumn column = new TreeViewerColumn(viewer, SWT.NONE);
 		Font pathFont = resources.create(FontDescriptor.createFrom(tree.getFont()).increaseHeight(-2));
-		column.setLabelProvider(
-				new ResultLabelProvider(this::previewReplacement, this::previewContextChars, pathFont));
+		column.setLabelProvider(new ResultLabelProvider(this::previewReplacement, this::previewContextChars,
+				() -> result.getNameMatchCount(), pathFont));
 		// the selection is lighter while the results have the focus
 		tree.addListener(SWT.FocusIn, e -> tree.redraw());
 		tree.addListener(SWT.FocusOut, e -> tree.redraw());
@@ -562,6 +622,26 @@ public class SearchView extends ViewPart {
 		regexAction = createOptionAction("Use Regular Expression", 'R', overlayIcon("regex"));
 		// the build output Eclipse marks as derived, e.g. Maven target/ folders
 		derivedAction = createOptionAction("Skip Derived Resources", 'D', icons.funnel());
+		// final*size instead of the regular expression final.*?size
+		wildcardAction = createOptionAction("Use Wildcards", 'A', null);
+		fileNamesAction = createOptionAction("Search File Names", 'F', null);
+		shortcuts = List.of(
+				new Shortcut(refreshAction, "Refresh", IWorkbenchCommandConstants.FILE_REFRESH, "F5"),
+				new Shortcut(clearAction, "Clear Search Results", "com.eklipse.search.clear", "M1+M2+BS"),
+				new Shortcut(expandAllAction, "Expand All", "com.eklipse.search.expandAll", "M1+="),
+				new Shortcut(collapseAllAction, "Collapse All", "com.eklipse.search.collapseAll", "M1+-"));
+		// a regular expression has wildcards of its own
+		regexAction.addPropertyChangeListener(e -> {
+			if (IAction.CHECKED.equals(e.getProperty())) {
+				wildcardAction.setEnabled(!regexAction.isChecked());
+				updateSearchHint();
+			}
+		});
+		wildcardAction.addPropertyChangeListener(e -> {
+			if (IAction.CHECKED.equals(e.getProperty())) {
+				updateSearchHint();
+			}
+		});
 		previewAction = new Action("Show Preview", IAction.AS_CHECK_BOX) {
 			@Override
 			public void run() {
@@ -652,19 +732,74 @@ public class SearchView extends ViewPart {
 		toolBar.add(collapseAllAction);
 		IMenuManager menu = bars.getMenuManager();
 		menu.add(regexAction);
+		menu.add(wildcardAction);
+		menu.add(fileNamesAction);
 		menu.add(derivedAction);
 		menu.add(new Separator());
 		menu.add(previewAction);
 
-		// Copy, Delete and Select All work on the text fields while they have focus, on the results otherwise
-		TextActionHandler textActionHandler = new TextActionHandler(bars);
-		for (Text text : texts()) {
-			textActionHandler.addText(text);
+		// Copy, Delete and Select All work on the fields while they have focus, on the results otherwise
+		FieldActionHandler fieldActionHandler = new FieldActionHandler(bars, copyAction, dismissAction,
+				selectAllAction);
+		for (Control field : fields()) {
+			fieldActionHandler.addField(field);
 		}
-		textActionHandler.setCopyAction(copyAction);
-		textActionHandler.setDeleteAction(dismissAction);
-		textActionHandler.setSelectAllAction(selectAllAction);
 		setUndoHandlersEnabled(true);
+	}
+
+	/**
+	 * Clear, Expand All and Collapse All are commands bound to keys in a context of the view's own, active while the
+	 * view is: there the keys win over the window's bindings, and they can be changed in the Keys preferences. Refresh
+	 * is the workbench's own, usually F5.
+	 */
+	private void activateShortcuts() {
+		getSite().getService(IContextService.class).activateContext(CONTEXT_ID);
+		IHandlerService handlers = getSite().getService(IHandlerService.class);
+		for (Shortcut shortcut : shortcuts) {
+			if (shortcut.action() != refreshAction) {
+				handlers.activateHandler(shortcut.commandId(), new ActionHandler(shortcut.action()));
+			}
+		}
+		getViewSite().getActionBars().setGlobalActionHandler(ActionFactory.REFRESH.getId(), refreshAction);
+		activationListener = new IPartListener2() {
+			@Override
+			public void partActivated(IWorkbenchPartReference partRef) {
+				if (partRef.getPart(false) == SearchView.this) {
+					// once the context is active, which happens on the same activation
+					display.asyncExec(SearchView.this::updateShortcutKeys);
+				}
+			}
+		};
+		getSite().getPage().addPartListener(activationListener);
+		updateShortcutKeys();
+	}
+
+	/**
+	 * Shows the key of each shortcut in its tooltip and menu label. The bindings of the view's context only count
+	 * while it's active, so until then the default key is shown, after that the one last seen, which stays correct
+	 * after a change in the Keys preferences.
+	 */
+	private void updateShortcutKeys() {
+		if (isDisposed()) {
+			return;
+		}
+		IBindingService bindings = getSite().getService(IBindingService.class);
+		boolean active = getSite().getPage().getActivePart() == this;
+		for (Shortcut shortcut : shortcuts) {
+			String key = active && bindings != null ? bindings.getBestActiveBindingFormattedFor(shortcut.commandId())
+					: formatKey(shortcut.defaultKey());
+			String text = key == null || key.isEmpty() ? shortcut.text() : shortcut.text() + " (" + key + ")";
+			shortcut.action().setText(text);
+			shortcut.action().setToolTipText(text);
+		}
+	}
+
+	private static String formatKey(String sequence) {
+		try {
+			return KeySequence.getInstance(sequence).format();
+		} catch (ParseException e) {
+			return null;
+		}
 	}
 
 	private void hookContextMenu() {
@@ -699,14 +834,10 @@ public class SearchView extends ViewPart {
 
 		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
 		searchText.addListener(SWT.DefaultSelection, e -> scheduleSearch(0));
+		// ↑ and ↓ browse the recent searches like in a terminal, the focus stays in the field
 		searchText.addListener(SWT.KeyDown, e -> {
-			if (e.keyCode == SWT.ARROW_DOWN && viewer.getTree().getItemCount() > 0) {
-				Tree tree = viewer.getTree();
-				tree.setFocus();
-				if (tree.getSelectionCount() == 0) {
-					tree.setSelection(tree.getItem(0));
-					updateSelectionActions();
-				}
+			if ((e.stateMask & SWT.MODIFIER_MASK) == 0 && (e.keyCode == SWT.ARROW_UP && searchHistory.showOlder()
+					|| e.keyCode == SWT.ARROW_DOWN && searchHistory.showNewer())) {
 				e.doit = false;
 			}
 		});
@@ -717,15 +848,15 @@ public class SearchView extends ViewPart {
 				replaceAll(true);
 			}
 		});
-		includeText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
-		excludeText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
+		includeField.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
+		excludeField.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
 
 		// typing in a text field must not undo the last replace
 		Listener focusTracker = e -> setUndoHandlersEnabled(e.type == SWT.FocusOut);
-		for (Text text : texts()) {
-			text.addListener(SWT.KeyDown, this::handleOptionKey);
-			text.addListener(SWT.FocusIn, focusTracker);
-			text.addListener(SWT.FocusOut, focusTracker);
+		for (Control field : fields()) {
+			field.addListener(SWT.KeyDown, this::handleOptionKey);
+			field.addListener(SWT.FocusIn, focusTracker);
+			field.addListener(SWT.FocusOut, focusTracker);
 		}
 
 		Tree tree = viewer.getTree();
@@ -743,12 +874,12 @@ public class SearchView extends ViewPart {
 		});
 	}
 
-	private Text[] texts() {
-		return new Text[] { searchText, replaceText, includeText, excludeText };
+	private Control[] fields() {
+		return new Control[] { searchText, replaceText, includeField, excludeField };
 	}
 
 	/**
-	 * Alt+C / Alt+W / Alt+R / Alt+P / Alt+D toggle the options like in VS Code (Option on macOS, where Cmd+Option+W is
+	 * Alt+C / Alt+W / Alt+R / Alt+P / Alt+D / Alt+A / Alt+F toggle the options like in VS Code (Option on macOS, where Cmd+Option+W is
 	 * already bound by Eclipse).
 	 */
 	private void handleOptionKey(Event e) {
@@ -759,6 +890,8 @@ public class SearchView extends ViewPart {
 		Action action = switch (key) {
 			case 'r' -> regexAction;
 			case 'd' -> derivedAction;
+			case 'a' -> wildcardAction;
+			case 'f' -> fileNamesAction;
 			default -> null;
 		};
 		if (action != null) {
@@ -838,6 +971,12 @@ public class SearchView extends ViewPart {
 			return;
 		}
 		Object first = viewer.getStructuredSelection().getFirstElement();
+		// a file found by its name is what was looked for, it's shown from the start
+		if (first instanceof FileNameMatch nameMatch) {
+			FileMatch fileMatch = result.get(nameMatch.getFile());
+			preview.show(nameMatch.getFile(), fileMatch != null ? fileMatch.getMatches() : List.of());
+			return;
+		}
 		LineMatch target = first instanceof LineMatch match ? match
 				: first instanceof FileMatch fileMatch && fileMatch.getMatchCount() > 0 ? fileMatch.getMatches().get(0)
 						: null;
@@ -853,7 +992,8 @@ public class SearchView extends ViewPart {
 
 	private SearchQuery currentQuery() {
 		return new SearchQuery(searchText.getText(), caseItem.getSelection(), wordItem.getSelection(),
-				regexAction.isChecked(), includeText.getText(), excludeText.getText(), derivedAction.isChecked());
+				regexAction.isChecked(), includeField.getText(), excludeField.getText(), derivedAction.isChecked(),
+				wildcardAction.isChecked(), fileNamesAction.isChecked());
 	}
 
 	private void scheduleSearch(int delayMs) {
@@ -904,6 +1044,11 @@ public class SearchView extends ViewPart {
 				s.hitFiles.add(match.getFile());
 				s.incoming.add(match);
 			};
+			// a search narrowing this one has to look at these files again too, for their name
+			Consumer<FileNameMatch> names = !query.fileNames() ? null : name -> {
+				s.hitFiles.add(name.getFile());
+				s.incomingNames.add(name);
+			};
 			// the search engine reports the files to search and the ones searched, for the progress bar
 			IProgressMonitor monitor = new ProgressMonitorWrapper(jobMonitor) {
 				@Override
@@ -925,8 +1070,9 @@ public class SearchView extends ViewPart {
 				}
 			};
 			int max = TextSearcher.DEFAULT_MAX_RESULTS;
-			TextSearcher.Result outcome = files != null ? TextSearcher.search(files, s.pattern, max, collector, monitor)
-					: TextSearcher.search(s.scope, s.pattern, max, collector, monitor);
+			TextSearcher.Result outcome = files != null
+					? TextSearcher.search(files, s.pattern, max, collector, names, monitor)
+					: TextSearcher.search(s.scope, s.pattern, max, collector, names, monitor);
 			s.outcome = outcome;
 			s.complete = !monitor.isCanceled() && !outcome.limitReached()
 					&& !outcome.status().matches(IStatus.CANCEL);
@@ -1010,6 +1156,7 @@ public class SearchView extends ViewPart {
 		if (finished) {
 			updateSummary();
 			updateSelectionActions();
+			searchHistory.searched(s.query.text());
 		} else {
 			display.timerExec(UPDATE_INTERVAL_MS, () -> pump(s));
 		}
@@ -1017,7 +1164,7 @@ public class SearchView extends ViewPart {
 
 	private void drain(SearchSession s) {
 		boolean replacePrevious = !s.shown;
-		if (s.incoming.isEmpty()) {
+		if (s.incoming.isEmpty() && s.incomingNames.isEmpty()) {
 			// the previous results stay a moment longer, the next matches may be about to arrive
 			if (replacePrevious && !s.done && System.currentTimeMillis() - s.startedAt < STALE_RESULTS_MS) {
 				return;
@@ -1034,6 +1181,7 @@ public class SearchView extends ViewPart {
 				s.shown = true;
 				showResult(new SearchResult());
 			}
+			addNameMatches(s);
 			Set<FileMatch> newFiles = new LinkedHashSet<>();
 			Map<FileMatch, List<LineMatch>> newMatches = new LinkedHashMap<>();
 			LineMatch match;
@@ -1071,6 +1219,26 @@ public class SearchView extends ViewPart {
 		updateSummary();
 	}
 
+	/**
+	 * Moves the files found by their name into the result and the tree, only the most relevant ones are kept.
+	 */
+	private void addNameMatches(SearchSession s) {
+		List<FileNameMatch> added = new ArrayList<>();
+		FileNameMatch name;
+		while ((name = s.incomingNames.poll()) != null) {
+			SearchResult.NameMatchChange change = result.addNameMatch(name, MAX_NAME_MATCHES);
+			if (change.added() != null) {
+				added.add(change.added());
+			}
+			if (change.dropped() != null && !added.remove(change.dropped())) {
+				viewer.remove(change.dropped());
+			}
+		}
+		if (!added.isEmpty()) {
+			viewer.add(result, added.toArray());
+		}
+	}
+
 	private void updateSummary() {
 		updateEmptyState();
 		SearchSession s = session;
@@ -1081,13 +1249,13 @@ public class SearchView extends ViewPart {
 			setSummary("Searching…", false);
 			return;
 		}
-		String counts = formatCounts(result.getMatchCount(), result.getFileCount());
+		String counts = formatCounts(result.getNameMatchCount(), result.getMatchCount(), result.getFileCount());
 		if (!s.done) {
-			setSummary(result.getMatchCount() == 0 ? "Searching…" : "Searching… " + counts, false);
+			setSummary(result.isEmpty() ? "Searching…" : "Searching… " + counts, false);
 			return;
 		}
 		TextSearcher.Result outcome = s.outcome;
-		StringBuilder summary = new StringBuilder(result.getMatchCount() == 0 ? "No results found." : counts);
+		StringBuilder summary = new StringBuilder(result.isEmpty() ? "No results found." : counts);
 		String tooltip = null;
 		if (outcome != null && outcome.limitReached()) {
 			summary.append(" (stopped at ").append(TextSearcher.DEFAULT_MAX_RESULTS)
@@ -1112,8 +1280,14 @@ public class SearchView extends ViewPart {
 		return text.toString().trim();
 	}
 
-	private static String formatCounts(int matches, int files) {
-		return matches + (matches == 1 ? " result in " : " results in ") + files + (files == 1 ? " file" : " files");
+	private static String formatCounts(int names, int matches, int files) {
+		String content = matches + (matches == 1 ? " result in " : " results in ") + files
+				+ (files == 1 ? " file" : " files");
+		if (names == 0) {
+			return content;
+		}
+		String found = names + (names == 1 ? " file name" : " file names");
+		return matches == 0 ? found : found + ", " + content;
 	}
 
 	private void setSummary(String text, boolean error) {
@@ -1134,9 +1308,9 @@ public class SearchView extends ViewPart {
 				emptyState.showNothingSearched();
 			}
 			setEmptyStateVisible(nothingSearched);
-		} else if (s.shown && result.getMatchCount() > 0) {
+		} else if (s.shown && !result.isEmpty()) {
 			setEmptyStateVisible(false);
-		} else if (s.shown && s.done && s.incoming.isEmpty()) {
+		} else if (s.shown && s.done && s.incoming.isEmpty() && s.incomingNames.isEmpty()) {
 			emptyState.showNoResults(s.query);
 			setEmptyStateVisible(true);
 		}
@@ -1173,6 +1347,7 @@ public class SearchView extends ViewPart {
 	}
 
 	private void clear() {
+		searchHistory.commit();
 		searchText.setText("");
 		replaceText.setText("");
 		startSearch();
@@ -1351,6 +1526,11 @@ public class SearchView extends ViewPart {
 					result.remove(file);
 					viewer.remove(old);
 				}
+				// a deleted file can't be opened from its name anymore either
+				FileNameMatch name = file.exists() ? null : result.removeNameMatch(file);
+				if (name != null) {
+					viewer.remove(name);
+				}
 				List<LineMatch> matches = byFile.get(file);
 				if (matches == null) {
 					continue;
@@ -1386,6 +1566,8 @@ public class SearchView extends ViewPart {
 		TreeItem item = viewer.getTree().getItem(new Point(e.x, e.y));
 		if (item != null && item.getData() instanceof LineMatch match) {
 			open(match, false);
+		} else if (item != null && item.getData() instanceof FileNameMatch nameMatch) {
+			open(nameMatch.getFile(), false);
 		}
 	}
 
@@ -1393,21 +1575,30 @@ public class SearchView extends ViewPart {
 		Object first = viewer.getStructuredSelection().getFirstElement();
 		if (first instanceof LineMatch match) {
 			open(match, activate);
+		} else if (first instanceof FileNameMatch nameMatch) {
+			open(nameMatch.getFile(), activate);
 		} else if (first instanceof FileMatch fileMatch) {
 			viewer.setExpandedState(fileMatch, !viewer.getExpandedState(fileMatch));
 		}
 	}
 
 	private void open(LineMatch match, boolean activate) {
+		IEditorPart editor = open(match.getFile(), activate);
+		ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
+		if (textEditor != null) {
+			textEditor.selectAndReveal(match.getOffset(), match.getLength());
+		}
+	}
+
+	/**
+	 * @return the editor, {@code null} if it couldn't be opened
+	 */
+	private IEditorPart open(IFile file, boolean activate) {
 		try {
-			IEditorPart editor = IDE.openEditor(getSite().getPage(), match.getFile(), activate);
-			ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
-			if (textEditor != null) {
-				textEditor.selectAndReveal(match.getOffset(), match.getLength());
-			}
+			return IDE.openEditor(getSite().getPage(), file, activate);
 		} catch (PartInitException e) {
-			ErrorDialog.openError(getSite().getShell(), TITLE, "Could not open " + match.getFile().getName(),
-					e.getStatus());
+			ErrorDialog.openError(getSite().getShell(), TITLE, "Could not open " + file.getName(), e.getStatus());
+			return null;
 		}
 	}
 
@@ -1436,6 +1627,10 @@ public class SearchView extends ViewPart {
 				if (element instanceof FileMatch fileMatch) {
 					if (result.remove(fileMatch.getFile()) != null) {
 						viewer.remove(fileMatch);
+					}
+				} else if (element instanceof FileNameMatch nameMatch) {
+					if (result.removeNameMatch(nameMatch.getFile()) != null) {
+						viewer.remove(nameMatch);
 					}
 				} else if (element instanceof LineMatch match) {
 					FileMatch parent = result.get(match.getFile());
@@ -1506,6 +1701,9 @@ public class SearchView extends ViewPart {
 		if (element instanceof FileMatch fileMatch) {
 			return result.get(fileMatch.getFile()) == fileMatch;
 		}
+		if (element instanceof FileNameMatch nameMatch) {
+			return result.getNameMatch(nameMatch.getFile()) == nameMatch;
+		}
 		if (element instanceof LineMatch match) {
 			FileMatch parent = result.get(match.getFile());
 			return parent != null && parent.getMatches().contains(match);
@@ -1521,6 +1719,8 @@ public class SearchView extends ViewPart {
 				for (LineMatch match : fileMatch.getMatches()) {
 					text.append("  ").append(match.getLineNumber()).append(": ").append(match.getPreview()).append('\n');
 				}
+			} else if (element instanceof FileNameMatch nameMatch) {
+				text.append(nameMatch.getFile().getFullPath().makeRelative()).append('\n');
 			} else if (element instanceof LineMatch match) {
 				text.append(match.getFile().getFullPath().makeRelative()).append(':').append(match.getLineNumber())
 						.append(": ").append(match.getPreview()).append('\n');
@@ -1533,7 +1733,8 @@ public class SearchView extends ViewPart {
 		Set<String> paths = new LinkedHashSet<>();
 		for (Object element : viewer.getStructuredSelection()) {
 			IFile file = element instanceof FileMatch fileMatch ? fileMatch.getFile()
-					: element instanceof LineMatch match ? match.getFile() : null;
+					: element instanceof FileNameMatch nameMatch ? nameMatch.getFile()
+							: element instanceof LineMatch match ? match.getFile() : null;
 			if (file != null) {
 				IPath location = file.getLocation();
 				paths.add(location != null ? location.toOSString() : file.getFullPath().toString());
@@ -1690,7 +1891,8 @@ public class SearchView extends ViewPart {
 	 */
 	public void activateSearch(String initialText) {
 		if (initialText != null && !initialText.isEmpty()) {
-			searchText.setText(regexAction.isChecked() ? SearchPatterns.escapeRegex(initialText) : initialText);
+			searchText.setText(regexAction.isChecked() ? SearchPatterns.escapeRegex(initialText)
+					: wildcardAction.isChecked() ? SearchPatterns.escapeWildcards(initialText) : initialText);
 			scheduleSearch(0);
 		}
 		searchText.setFocus();
@@ -1712,12 +1914,16 @@ public class SearchView extends ViewPart {
 		return searchText;
 	}
 
-	Text getIncludeText() {
-		return includeText;
+	Combo getIncludeField() {
+		return includeField;
 	}
 
-	Text getExcludeText() {
-		return excludeText;
+	Combo getExcludeField() {
+		return excludeField;
+	}
+
+	FieldHistory getSearchHistory() {
+		return searchHistory;
 	}
 
 	FieldHistory getIncludeHistory() {
@@ -1757,7 +1963,8 @@ public class SearchView extends ViewPart {
 	 */
 	boolean isSearching() {
 		SearchSession s = session;
-		return searchScheduled || s != null && (!s.done || !s.shown || !s.incoming.isEmpty())
+		return searchScheduled
+				|| s != null && (!s.done || !s.shown || !s.incoming.isEmpty() || !s.incomingNames.isEmpty())
 				|| getSummary().startsWith("Searching");
 	}
 
@@ -1785,15 +1992,22 @@ public class SearchView extends ViewPart {
 		IMemento m = memento;
 		searchText.setText(string(m, KEY_QUERY, ""));
 		replaceText.setText(string(m, KEY_REPLACE, ""));
-		includeText.setText(string(m, KEY_INCLUDES, DEFAULT_INCLUDES));
-		excludeText.setText(string(m, KEY_EXCLUDES, DEFAULT_EXCLUDES));
+		includeField.setText(string(m, KEY_INCLUDES, DEFAULT_INCLUDES));
+		String excludes = string(m, KEY_EXCLUDES, DEFAULT_EXCLUDES);
+		excludeField.setText(PREVIOUS_DEFAULT_EXCLUDES.equals(excludes) ? DEFAULT_EXCLUDES : excludes);
+		searchHistory.restore(string(m, KEY_SEARCH_HISTORY, null));
 		includeHistory.restore(string(m, KEY_INCLUDE_HISTORY, null));
 		excludeHistory.restore(string(m, KEY_EXCLUDE_HISTORY, null));
 		caseItem.setSelection(bool(m, KEY_CASE, false));
 		wordItem.setSelection(bool(m, KEY_WORD, false));
 		regexAction.setChecked(bool(m, KEY_REGEX, false));
 		preserveCaseItem.setSelection(bool(m, KEY_PRESERVE_CASE, false));
+		for (ToolItem item : new ToolItem[] { caseItem, wordItem, preserveCaseItem }) {
+			updateToggle(item);
+		}
 		derivedAction.setChecked(bool(m, KEY_DERIVED, true));
+		wildcardAction.setChecked(bool(m, KEY_WILDCARDS, true));
+		fileNamesAction.setChecked(bool(m, KEY_FILE_NAMES, true));
 		boolean replaceVisible = bool(m, KEY_REPLACE_VISIBLE, false);
 		setVisible(replaceVisible, replaceText, replaceBar);
 		updateReplaceToggle(replaceVisible);
@@ -1826,8 +2040,9 @@ public class SearchView extends ViewPart {
 		}
 		m.putString(KEY_QUERY, searchText.getText());
 		m.putString(KEY_REPLACE, replaceText.getText());
-		m.putString(KEY_INCLUDES, includeText.getText());
-		m.putString(KEY_EXCLUDES, excludeText.getText());
+		m.putString(KEY_INCLUDES, includeField.getText());
+		m.putString(KEY_EXCLUDES, excludeField.getText());
+		m.putString(KEY_SEARCH_HISTORY, searchHistory.save());
 		m.putString(KEY_INCLUDE_HISTORY, includeHistory.save());
 		m.putString(KEY_EXCLUDE_HISTORY, excludeHistory.save());
 		m.putBoolean(KEY_CASE, caseItem.getSelection());
@@ -1835,6 +2050,8 @@ public class SearchView extends ViewPart {
 		m.putBoolean(KEY_REGEX, regexAction.isChecked());
 		m.putBoolean(KEY_PRESERVE_CASE, preserveCaseItem.getSelection());
 		m.putBoolean(KEY_DERIVED, derivedAction.isChecked());
+		m.putBoolean(KEY_WILDCARDS, wildcardAction.isChecked());
+		m.putBoolean(KEY_FILE_NAMES, fileNamesAction.isChecked());
 		m.putBoolean(KEY_REPLACE_VISIBLE, isReplaceVisible());
 		m.putBoolean(KEY_PREVIEW, isPreviewVisible());
 		int[] weights = resultSash.getWeights();
@@ -1853,6 +2070,9 @@ public class SearchView extends ViewPart {
 
 	@Override
 	public void dispose() {
+		if (activationListener != null) {
+			getSite().getPage().removePartListener(activationListener);
+		}
 		if (resourceListener != null) {
 			ResourcesPlugin.getWorkspace().removeResourceChangeListener(resourceListener);
 			FileBuffers.getTextFileBufferManager().removeFileBufferListener(bufferListener);

@@ -1,5 +1,8 @@
 package com.eklipse.search.ui;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.eclipse.jface.viewers.ITreeContentProvider;
 import org.eclipse.jface.viewers.Viewer;
 
@@ -8,7 +11,8 @@ import com.eklipse.search.core.LineMatch;
 import com.eklipse.search.core.SearchResult;
 
 /**
- * Files on the first level, their matches below.
+ * The files found by their name and the files with matches in their content on the first level, the matches below the
+ * latter.
  */
 final class ResultContentProvider implements ITreeContentProvider {
 
@@ -23,7 +27,12 @@ final class ResultContentProvider implements ITreeContentProvider {
 
 	@Override
 	public Object[] getElements(Object input) {
-		return input instanceof SearchResult searchResult ? searchResult.getFiles().toArray() : NONE;
+		if (!(input instanceof SearchResult searchResult)) {
+			return NONE;
+		}
+		List<Object> elements = new ArrayList<>(searchResult.getNameMatches());
+		elements.addAll(searchResult.getFiles());
+		return elements.toArray();
 	}
 
 	@Override

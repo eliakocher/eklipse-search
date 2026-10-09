@@ -71,7 +71,7 @@ class SearchViewPerformanceTest {
 		view.getCaseItem().setSelection(false);
 		view.getRegexAction().setChecked(false);
 		view.getReplaceText().setText("");
-		view.getIncludeText().setText("");
+		view.getIncludeField().setText("");
 		view.getSearchText().setText("");
 		drain(500);
 	}

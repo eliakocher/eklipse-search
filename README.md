@@ -43,7 +43,7 @@ See [Usage](#usage) for everything else.
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.6-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.7-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -66,10 +66,10 @@ See [Usage](#usage) for everything else.
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.6-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.7-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.6-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.7-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -98,8 +98,8 @@ See [Usage](#usage) for everything else.
 - *Include* (prefilled with `*.java`) / *Exclude* (prefilled with `testbundle.*, **/node_modules`): VS Code
   globs (see below), always visible below the search field. *Skip Derived Resources* in the view's ⋮ menu leaves out
   the build output Eclipse marks as derived, e.g. Maven `target/` folders (on by default). The view remembers what
-  you enter there, and the search options, across restarts. The arrow next to each field (or `↓` in it) lists the last
-  15 values you used there, a value counts once you leave the field or press `Enter`
+  you enter there, and the search options, across restarts. Both are combo boxes: the arrow in the field lists the
+  last 15 values you used there, a value counts once you leave the field or press `Enter`
 - Preview like Quick Search: a click on a result shows its file below the results, with the line of the match
   highlighted and all matches marked; a double-click or `Enter` opens it. Switch it off with *Show Preview* in the
   view's ⋮ menu, then a click opens the editor right away, like in VS Code
@@ -135,8 +135,8 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 | Open the view | `Ctrl+Alt+Shift+F` (Windows, Linux) / `Cmd+Alt+Shift+F` (macOS), *Search > Eklipse Search...*, or *Window > Show View > General > Search* (the one with the blue magnifier, Eclipse's own search results view has the same name) |
 | Prefill | select text in an editor before opening the view |
 | Toggle match case / whole word / regex / preserve case / skip derived resources | `Alt+C` / `Alt+W` / `Alt+R` / `Alt+P` / `Alt+D` (`⌥` on macOS), or click the buttons (regex and derived resources: the view's ⋮ menu) |
-| Jump into the results | `↓` in the search field |
-| Reuse an include/exclude pattern | the arrow next to the field, or `↓` in it |
+| Previous searches | `↑` / `↓` in the search field, the last 10 like in a terminal (a search counts once you leave the field or press `Enter`) |
+| Reuse an include/exclude pattern | the arrow in the field |
 | Preview a match | click it: the file shows below the results. With *Show Preview* off, it opens in the editor without leaving the view |
 | Open a match | double-click or `Enter` |
 | Dismiss | `Delete` / `Backspace` |
