@@ -63,8 +63,11 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 	 */
 	public boolean isNarrowedBy(SearchQuery other) {
 		if (isEmpty() || wholeWord || regex || other.wholeWord || other.regex || caseSensitive != other.caseSensitive
-				|| excludeDerived != other.excludeDerived || !includes.equals(other.includes)
-				|| !excludes.equals(other.excludes) || wildcards != other.wildcards || fileNames != other.fileNames) {
+				|| !hasSameScope(other) || wildcards != other.wildcards || fileNames != other.fileNames) {
+			return false;
+		}
+		// a file found by its path needn't have found anything in the previous search
+		if (fileNames && other.isFilePath()) {
 			return false;
 		}
 		if (wildcards && (text.replace("*", "").isEmpty() || text.indexOf('\\') >= 0
@@ -78,5 +81,24 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Tells whether the text looks like the path of a file, e.g. {@code src/main/java/Foo.java} copied from a diff, so
+	 * the files are found by their path rather than their name, see {@link TextSearcher#searchPath}.
+	 *
+	 * @return {@code true} if the text is a plain text with a slash, not ending with one
+	 */
+	public boolean isFilePath() {
+		return !regex && text.indexOf('/') >= 0 && !text.endsWith("/") && !(wildcards && text.indexOf('*') >= 0);
+	}
+
+	/**
+	 * @param other another query
+	 * @return {@code true} if both queries look at the same files
+	 */
+	public boolean hasSameScope(SearchQuery other) {
+		return includes.equals(other.includes) && excludes.equals(other.excludes)
+				&& excludeDerived == other.excludeDerived;
 	}
 }

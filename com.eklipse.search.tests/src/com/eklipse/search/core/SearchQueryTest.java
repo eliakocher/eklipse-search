@@ -24,6 +24,9 @@ class SearchQueryTest {
 		assertFalse(query("sms", false, true).isNarrowedBy(query("smsSender", false, true)), "whole words");
 		assertFalse(query("sms", false, false).isNarrowedBy(new SearchQuery("smsS", false, false, false, "*.java", "",
 				true)), "other files");
+		// Foo.java is found by its path, it needn't contain Foo
+		assertFalse(new SearchQuery("Foo", false, false, false, "", "", true, false, true).isNarrowedBy(
+				new SearchQuery("src/Foo.java", false, false, false, "", "", true, false, true)), "a path");
 	}
 
 	@Test

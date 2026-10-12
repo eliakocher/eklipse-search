@@ -472,6 +472,18 @@ class SearchViewUiTest {
 		processEvents();
 		assertEquals(configuration, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
 		assertEquals("sendSms", editorSelection().getText());
+
+		// like Open Resource: a pasted file name or path and Enter open the file
+		IFile sender = project.getFile("src/com/example/SmsSender.java");
+		IDE.setDefaultEditor(sender, "org.eclipse.ui.DefaultTextEditor");
+		page.activate(view);
+		search.selectAll();
+		search.insert(" repository/src/com/example/SmsSender.java\n");
+		assertEquals("repository/src/com/example/SmsSender.java", search.getText(), "trimmed");
+		search.notifyListeners(SWT.DefaultSelection, new Event());
+		waitForSearch();
+		processEvents();
+		assertEquals(sender, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
 	}
 
 	private ITextSelection editorSelection() {

@@ -96,6 +96,16 @@ public final class WorkspaceSearchScope extends TextSearchScope {
 		return acceptsFile(relativePath(file.getFullPath()));
 	}
 
+	/**
+	 * Checks only the include/exclude globs, so it works for a file that doesn't exist anymore too.
+	 *
+	 * @param file the file to check
+	 * @return {@code true} if the globs accept the file
+	 */
+	public boolean matchesGlobs(IFile file) {
+		return acceptsFile(relativePath(file.getFullPath()));
+	}
+
 	private boolean acceptsFile(String path) {
 		return !excludes.matches(path) && (includes.isEmpty() || includes.matches(path));
 	}

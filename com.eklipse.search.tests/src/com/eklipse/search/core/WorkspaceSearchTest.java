@@ -25,6 +25,7 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.MultiStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.ltk.core.refactoring.RefactoringCore;
@@ -122,15 +123,41 @@ class WorkspaceSearchTest {
 	@Test
 	void fileNamesMatchInTheSameScope() {
 		SearchQuery query = new SearchQuery("JAVA", false, false, false, "", "node_modules", true);
-		List<String> names = Collections.synchronizedList(new ArrayList<>());
+		List<String> names = new ArrayList<>();
+		MultiStatus status = new MultiStatus(getClass(), 0, "");
+		IFile[] files = new ScopeFiles().get(query, WorkspaceSearchScope.of(query), status);
 
-		TextSearcher.search(WorkspaceSearchScope.of(query), query.createPattern(), 1000, match -> {
-		}, name -> names.add(name.getFile().getFullPath().makeRelative() + ":" + name.getStart() + "-" + name.getEnd()),
+		TextSearcher.searchNames(files, query.createPattern(),
+				name -> names.add(name.getFile().getFullPath().makeRelative() + ":" + name.getStart() + "-" + name.getEnd()),
 				new NullProgressMonitor());
 
 		// not the derived target/Gen.java, Nested.java once
 		names.sort(null);
 		assertEquals(List.of("search-nested/Nested.java:7-11", "search-test/src/Foo.java:4-8"), names);
+	}
+
+	@Test
+	void pathsFindTheFilesWithTheMostMatchingFolders() throws CoreException {
+		createFile("web/Foo.java", JAVA);
+		SearchQuery query = new SearchQuery("x", false, false, false, "", "node_modules", true);
+		IFile[] files = new ScopeFiles().get(query, WorkspaceSearchScope.of(query), new MultiStatus(getClass(), 0, ""));
+
+		assertEquals(List.of("search-test/src/Foo.java"), findPath(files, "repository/SRC/foo.java"),
+				"relative to somewhere else, ignoring the case");
+		assertEquals(List.of("search-test/web/Foo.java"),
+				findPath(files, project.getFile("web/Foo.java").getLocation().toString()), "absolute");
+		// the folder of the nested project is in the path, not in the workspace path search-nested/Nested.java
+		assertEquals(List.of("search-nested/Nested.java"), findPath(files, "search-test/module/Nested.java"));
+		assertEquals(List.of("search-test/src/Foo.java", "search-test/web/Foo.java"), findPath(files, "moved/Foo.java"),
+				"all files with the name if no folder matches");
+	}
+
+	private static List<String> findPath(IFile[] files, String path) {
+		List<String> found = new ArrayList<>();
+		TextSearcher.searchPath(files, path, false,
+				name -> found.add(name.getFile().getFullPath().makeRelative().toString()), new NullProgressMonitor());
+		found.sort(null);
+		return found;
 	}
 
 	@Test

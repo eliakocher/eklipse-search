@@ -13,8 +13,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.DoubleAdder;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.DoubleAdder;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -35,6 +35,7 @@ import org.eclipse.core.runtime.ILog;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.MultiStatus;
 import org.eclipse.core.runtime.ProgressMonitorWrapper;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.IJobChangeEvent;
@@ -119,6 +120,7 @@ import com.eklipse.search.core.LineMatch;
 import com.eklipse.search.core.PreserveCase;
 import com.eklipse.search.core.ReplacementTemplate;
 import com.eklipse.search.core.Replacer;
+import com.eklipse.search.core.ScopeFiles;
 import com.eklipse.search.core.SearchPatterns;
 import com.eklipse.search.core.SearchQuery;
 import com.eklipse.search.core.SearchResult;
@@ -239,9 +241,15 @@ public class SearchView extends ViewPart {
 	/** The current search, read by the resource listener thread. */
 	private volatile SearchSession session;
 	private final Set<IFile> pendingRefresh = new HashSet<>();
+	private final ScopeFiles scopeFiles = new ScopeFiles();
+	private Job scopeFilesJob;
 	private IResourceChangeListener resourceListener;
 	private final IFileBufferListener bufferListener = new BufferListener();
 	private boolean searchScheduled;
+	/** Whether the change of the search text being made inserts more than a character, like a paste. */
+	private boolean insertedAtOnce;
+	/** Set while the view sets the search text itself, which isn't a paste. */
+	private boolean settingSearchText;
 	/** The first result, selected by {@link #selectFirstResult()} until another one is. */
 	private Object autoSelected;
 	private LocalResourceManager resources;
@@ -357,6 +365,7 @@ public class SearchView extends ViewPart {
 
 		resourceListener = this::resourceChanged;
 		ResourcesPlugin.getWorkspace().addResourceChangeListener(resourceListener, IResourceChangeEvent.POST_CHANGE);
+		ResourcesPlugin.getWorkspace().addResourceChangeListener(scopeFiles, IResourceChangeEvent.POST_CHANGE);
 		FileBuffers.getTextFileBufferManager().addFileBufferListener(bufferListener);
 	}
 
@@ -846,7 +855,19 @@ public class SearchView extends ViewPart {
 		preserveCaseItem.addListener(SWT.Selection, e -> scheduleLabelRefresh());
 		replaceAllItem.addListener(SWT.Selection, e -> replaceAll(true));
 
-		searchText.addModifyListener(e -> scheduleSearch(SEARCH_DELAY_MS));
+		// a pasted text is complete and searched at once, a typed one comes a character at a time
+		searchText.addListener(SWT.Verify, e -> {
+			insertedAtOnce = !settingSearchText && e.text.length() > 1;
+			// a copied name often comes with a space or line break around it, which no file name has
+			if (insertedAtOnce) {
+				e.text = e.text.strip();
+			}
+		});
+		searchText.addModifyListener(e -> {
+			scheduleSearch(insertedAtOnce ? 0 : SEARCH_DELAY_MS);
+			insertedAtOnce = false;
+			prepareScopeFiles();
+		});
 		// Enter opens the selected result like in Open Resource, the clear button only clears the field
 		searchText.addListener(SWT.DefaultSelection, e -> {
 			if (e.detail == SWT.ICON_CANCEL) {
@@ -861,10 +882,16 @@ public class SearchView extends ViewPart {
 			int modifiers = e.stateMask & SWT.MODIFIER_MASK;
 			if (modifiers == SWT.ALT && (e.keyCode == SWT.ARROW_UP || e.keyCode == SWT.ARROW_DOWN)) {
 				e.doit = false;
-				if (e.keyCode == SWT.ARROW_UP) {
-					searchHistory.showOlder();
-				} else {
-					searchHistory.showNewer();
+				// not at once like a paste: holding the key goes through the searches, the one it stops at is searched
+				settingSearchText = true;
+				try {
+					if (e.keyCode == SWT.ARROW_UP) {
+						searchHistory.showOlder();
+					} else {
+						searchHistory.showNewer();
+					}
+				} finally {
+					settingSearchText = false;
 				}
 				return;
 			}
@@ -1114,10 +1141,20 @@ public class SearchView extends ViewPart {
 					super.internalWorked(work);
 				}
 			};
-			int max = TextSearcher.DEFAULT_MAX_RESULTS;
-			TextSearcher.Result outcome = files != null
-					? TextSearcher.search(files, s.pattern, max, collector, names, monitor)
-					: TextSearcher.search(s.scope, s.pattern, max, collector, names, monitor);
+			IFile[] searched = files != null ? files : scopeFiles(query, s.scope);
+			// all names before the content, so the file looked for is there at once and selected as the first result
+			if (names != null) {
+				if (query.isFilePath()) {
+					TextSearcher.searchPath(searched, query.text(), query.caseSensitive(), names, monitor);
+				} else {
+					TextSearcher.searchNames(searched, s.pattern, names, monitor);
+				}
+				if (!s.incomingNames.isEmpty() && !display.isDisposed()) {
+					display.asyncExec(() -> showNameMatches(s));
+				}
+			}
+			TextSearcher.Result outcome = TextSearcher.search(searched, s.pattern, TextSearcher.DEFAULT_MAX_RESULTS,
+					collector, monitor);
 			s.outcome = outcome;
 			s.complete = !monitor.isCanceled() && !outcome.limitReached()
 					&& !outcome.status().matches(IStatus.CANCEL);
@@ -1154,6 +1191,35 @@ public class SearchView extends ViewPart {
 		}
 		files.removeIf(file -> !scope.containsFile(file));
 		return files.toArray(IFile[]::new);
+	}
+
+	/**
+	 * @return the files of the scope, walking the workspace only if they aren't known from an earlier search
+	 */
+	private IFile[] scopeFiles(SearchQuery query, WorkspaceSearchScope scope) {
+		MultiStatus status = new MultiStatus(SearchView.class, 0, "Problems collecting the files to search");
+		IFile[] files = scopeFiles.get(query, scope, status);
+		if (!status.isOK()) {
+			LOG.log(status);
+		}
+		return files;
+	}
+
+	/**
+	 * Collects the files to search while the search text is typed, so the search after the typing delay finds them
+	 * ready.
+	 */
+	private void prepareScopeFiles() {
+		SearchQuery query = currentQuery();
+		if (query.isEmpty() || scopeFiles.isCached(query) || scopeFilesJob != null
+				&& scopeFilesJob.getState() != Job.NONE) {
+			return;
+		}
+		scopeFilesJob = Job.create("Search: collecting files", monitor -> {
+			scopeFiles(query, WorkspaceSearchScope.of(query));
+		});
+		scopeFilesJob.setSystem(true);
+		scopeFilesJob.schedule();
 	}
 
 	private static IFile fileOf(IFileBuffer buffer) {
@@ -1272,6 +1338,21 @@ public class SearchView extends ViewPart {
 		selectFirstResult();
 		editorMarks.scheduleUpdate();
 		updateSummary();
+	}
+
+	/**
+	 * Shows the files found by their name without waiting for the next {@link #pump}. Enter pressed before the results
+	 * were there opens the first one now, the content can't add a better one: names are sorted first.
+	 */
+	private void showNameMatches(SearchSession s) {
+		if (s != session || isDisposed()) {
+			return;
+		}
+		drain(s);
+		if (s.openWhenDone && result.getNameMatchCount() > 0) {
+			s.openWhenDone = false;
+			openSelectedResult();
+		}
 	}
 
 	/**
@@ -2118,8 +2199,13 @@ public class SearchView extends ViewPart {
 	 */
 	public void activateSearch(String initialText) {
 		if (initialText != null && !initialText.isEmpty()) {
-			searchText.setText(regexAction.isChecked() ? SearchPatterns.escapeRegex(initialText)
-					: wildcardAction.isChecked() ? SearchPatterns.escapeWildcards(initialText) : initialText);
+			settingSearchText = true;
+			try {
+				searchText.setText(regexAction.isChecked() ? SearchPatterns.escapeRegex(initialText)
+						: wildcardAction.isChecked() ? SearchPatterns.escapeWildcards(initialText) : initialText);
+			} finally {
+				settingSearchText = false;
+			}
 			scheduleSearch(0);
 		}
 		searchText.setFocus();
@@ -2300,6 +2386,7 @@ public class SearchView extends ViewPart {
 		}
 		if (resourceListener != null) {
 			ResourcesPlugin.getWorkspace().removeResourceChangeListener(resourceListener);
+			ResourcesPlugin.getWorkspace().removeResourceChangeListener(scopeFiles);
 			FileBuffers.getTextFileBufferManager().removeFileBufferListener(bufferListener);
 		}
 		cancelSearch();
