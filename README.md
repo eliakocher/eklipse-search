@@ -14,8 +14,10 @@ Works with Eclipse 2024-03 or newer on macOS, Windows and Linux. Tested so far o
 
 1. *Help > Install New Software...*
 2. Paste `https://eliakocher.github.io/eklipse-search/` into *Work with* and press `Enter`.
-3. Check *Eklipse Tools > Eklipse Search*. Unchecking *Contact all update sites during install to find required
-   software* makes the install faster.
+3. Check *Eklipse Tools > Eklipse Search* and uncheck *Contact all update sites during install to find required
+   software*. The plugin needs nothing beyond what Eclipse already has. Left checked, p2 also upgrades unrelated
+   Eclipse bundles to the newest versions on the other enabled update sites (e.g. a *releases/latest* site newer than
+   your installation), which can leave other plugins unresolved and make Eclipse start much slower.
 4. *Next*, *Next*, *Finish*.
 5. Eclipse asks whether you trust the signer of the plugin, *Eklipse Search*: select it, check *Remember selected
    signers* and confirm with *Trust Selected*. Updates signed with the same key then install without asking.
@@ -35,7 +37,9 @@ If the shortcut doesn't work, or you want a different one:
 
 See [Usage](#usage) for everything else.
 
-**Update:** *Help > Check for Updates* finds new versions on the update site.
+**Update:** install the new version the same way, through *Install New Software* with *Contact all update sites
+during install to find required software* unchecked; Eclipse shows it as an update. Don't use *Help > Check for
+Updates*: it consults every enabled update site, with the same effect as leaving that box checked.
 
 **Uninstall:** *Help > About Eclipse IDE* (*Eclipse > About Eclipse IDE* on macOS) *> Installation Details*, select
 *Eklipse Search*, *Uninstall...*.
