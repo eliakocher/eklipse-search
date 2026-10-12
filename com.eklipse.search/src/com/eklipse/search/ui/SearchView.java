@@ -61,6 +61,9 @@ import org.eclipse.jface.resource.JFaceColors;
 import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.resource.LocalResourceManager;
 import org.eclipse.jface.resource.ResourceLocator;
+import org.eclipse.jface.text.BadLocationException;
+import org.eclipse.jface.text.IDocument;
+import org.eclipse.jface.text.IRegion;
 import org.eclipse.jface.util.Util;
 import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.IStructuredSelection;
@@ -116,6 +119,7 @@ import org.eclipse.ui.texteditor.ITextEditor;
 
 import com.eklipse.search.core.FileMatch;
 import com.eklipse.search.core.FileNameMatch;
+import com.eklipse.search.core.FileNameSearch;
 import com.eklipse.search.core.LineMatch;
 import com.eklipse.search.core.PreserveCase;
 import com.eklipse.search.core.ReplacementTemplate;
@@ -1046,7 +1050,8 @@ public class SearchView extends ViewPart {
 		// a file found by its name is what was looked for, it's shown from the start
 		if (first instanceof FileNameMatch nameMatch) {
 			FileMatch fileMatch = result.get(nameMatch.getFile());
-			preview.show(nameMatch.getFile(), fileMatch != null ? fileMatch.getMatches() : List.of());
+			preview.show(nameMatch.getFile(), nameMatch.getLine(),
+					fileMatch != null ? fileMatch.getMatches() : List.of());
 			return;
 		}
 		LineMatch target = first instanceof LineMatch match ? match
@@ -1144,11 +1149,7 @@ public class SearchView extends ViewPart {
 			IFile[] searched = files != null ? files : scopeFiles(query, s.scope);
 			// all names before the content, so the file looked for is there at once and selected as the first result
 			if (names != null) {
-				if (query.isFilePath()) {
-					TextSearcher.searchPath(searched, query.text(), query.caseSensitive(), names, monitor);
-				} else {
-					TextSearcher.searchNames(searched, s.pattern, names, monitor);
-				}
+				FileNameSearch.search(searched, query, s.pattern, names, monitor);
 				if (!s.incomingNames.isEmpty() && !display.isDisposed()) {
 					display.asyncExec(() -> showNameMatches(s));
 				}
@@ -1710,7 +1711,7 @@ public class SearchView extends ViewPart {
 		if (item != null && item.getData() instanceof LineMatch match) {
 			open(match, false);
 		} else if (item != null && item.getData() instanceof FileNameMatch nameMatch) {
-			open(nameMatch.getFile(), false);
+			open(nameMatch, false);
 		}
 	}
 
@@ -1719,7 +1720,7 @@ public class SearchView extends ViewPart {
 		if (first instanceof LineMatch match) {
 			open(match, activate);
 		} else if (first instanceof FileNameMatch nameMatch) {
-			open(nameMatch.getFile(), activate);
+			open(nameMatch, activate);
 		} else if (first instanceof FileMatch fileMatch) {
 			viewer.setExpandedState(fileMatch, !viewer.getExpandedState(fileMatch));
 		}
@@ -1867,6 +1868,25 @@ public class SearchView extends ViewPart {
 		ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
 		if (textEditor != null) {
 			textEditor.selectAndReveal(match.getOffset(), match.getLength());
+		}
+	}
+
+	/**
+	 * Opens a file found by its name, at the line it was referred to with.
+	 */
+	private void open(FileNameMatch nameMatch, boolean activate) {
+		IEditorPart editor = open(nameMatch.getFile(), activate);
+		ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
+		if (textEditor == null || nameMatch.getLine() <= 0) {
+			return;
+		}
+		IDocument document = textEditor.getDocumentProvider().getDocument(textEditor.getEditorInput());
+		try {
+			// a line past the end, e.g. from an older version of the file, is the last one
+			IRegion line = document.getLineInformation(Math.min(nameMatch.getLine(), document.getNumberOfLines()) - 1);
+			textEditor.selectAndReveal(line.getOffset(), 0);
+		} catch (BadLocationException e) {
+			// can't happen, the line is in the document
 		}
 	}
 

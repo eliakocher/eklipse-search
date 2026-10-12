@@ -116,7 +116,11 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		if (element instanceof FileNameMatch nameMatch) {
 			IFile file = nameMatch.getFile();
 			StyledString text = new StyledString(file.getName());
-			text.setStyle(nameMatch.getStart(), nameMatch.getEnd() - nameMatch.getStart(), matchStyler);
+			int[] highlights = nameMatch.getHighlights();
+			for (int i = 0; i < highlights.length; i += 2) {
+				text.setStyle(highlights[i], highlights[i + 1] - highlights[i], matchStyler);
+			}
+			text.append(lineSuffix(nameMatch), StyledString.COUNTER_STYLER);
 			text.append(PATH_SEPARATOR + folder(file), StyledString.QUALIFIER_STYLER);
 			return text;
 		}
@@ -185,9 +189,9 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	protected void paint(Event event, Object element) {
 		if (element instanceof FileMatch fileMatch) {
 			drawSeparator(event);
-			paintFile(event, fileMatch.getFile(), " " + fileMatch.getMatchCount(), -1, -1);
+			paintFile(event, fileMatch.getFile(), " " + fileMatch.getMatchCount(), new int[0]);
 		} else if (element instanceof FileNameMatch nameMatch) {
-			paintFile(event, nameMatch.getFile(), "", nameMatch.getStart(), nameMatch.getEnd());
+			paintFile(event, nameMatch.getFile(), lineSuffix(nameMatch), nameMatch.getHighlights());
 		} else {
 			super.paint(event, element);
 		}
@@ -197,11 +201,10 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 	 * Like {@code super.paint}, with the folder in a smaller font and shortened in the middle to fit: the project and
 	 * the innermost folders say more than the cut off end of a long path.
 	 *
-	 * @param count the number of matches after the name, empty for none
-	 * @param highlightStart the start of the part of the name to highlight, {@code -1} for none
-	 * @param highlightEnd the end of the part of the name to highlight
+	 * @param count the number of matches or the line after the name, empty for none
+	 * @param highlights the parts of the name to highlight, as start/end pairs
 	 */
-	private void paintFile(Event event, IFile file, String count, int highlightStart, int highlightEnd) {
+	private void paintFile(Event event, IFile file, String count, int[] highlights) {
 		TreeItem item = (TreeItem) event.item;
 		GC gc = event.gc;
 		Image image = item.getImage();
@@ -226,12 +229,12 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		fileLayout.setText("");
 		fileLayout.setText(text);
 		fileLayout.setFont(font);
-		int countStart = file.getName().length() + 1;
+		int countStart = file.getName().length();
 		int pathStart = name.length();
 		ColorRegistry colors = JFaceResources.getColorRegistry();
-		if (highlightStart >= 0) {
-			fileLayout.setStyle(new TextStyle(null, null, colors.get(MATCH_HIGHLIGHT)), highlightStart,
-					highlightEnd - 1);
+		for (int i = 0; i < highlights.length; i += 2) {
+			fileLayout.setStyle(new TextStyle(null, null, colors.get(MATCH_HIGHLIGHT)), highlights[i],
+					highlights[i + 1] - 1);
 		}
 		fileLayout.setStyle(new TextStyle(null, colors.get(JFacePreferences.COUNTER_COLOR), null), countStart,
 				pathStart - 1);
@@ -255,6 +258,13 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			gc.drawLine(0, event.y, tree.getClientArea().width, event.y);
 			gc.setForeground(foreground);
 		}
+	}
+
+	/**
+	 * @return the line the file was referred to with, like in {@code Foo.java:42}, empty for none
+	 */
+	private static String lineSuffix(FileNameMatch nameMatch) {
+		return nameMatch.getLine() > 0 ? ":" + nameMatch.getLine() : "";
 	}
 
 	private static String folder(IFile file) {

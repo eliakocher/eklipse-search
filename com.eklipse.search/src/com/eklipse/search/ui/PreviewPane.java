@@ -102,6 +102,8 @@ final class PreviewPane {
 	private LineMatch target;
 	/** The file to show, also while it's loading. */
 	private IFile targetFile;
+	/** The line to show without a {@link #target}, starting at 1, 0 for the start of the file. */
+	private int targetLine;
 	private List<LineMatch> matches = List.of();
 	/** The marked matches in the shown document, sorted and without overlaps. */
 	private StyleRange[] marks = {};
@@ -187,23 +189,25 @@ final class PreviewPane {
 	 * @param fileMatches all matches of the file, to mark them
 	 */
 	void show(LineMatch match, List<LineMatch> fileMatches) {
-		show(match.getFile(), match, fileMatches);
+		show(match.getFile(), match, 0, fileMatches);
 	}
 
 	/**
-	 * Shows a file from its start, e.g. one found by its name.
+	 * Shows a file found by its name, from its start or at the line it was referred to with.
 	 *
 	 * @param file the file
+	 * @param line the line to show, starting at 1, 0 for the start of the file
 	 * @param fileMatches all matches of the file, to mark them
 	 */
-	void show(IFile file, List<LineMatch> fileMatches) {
-		show(file, null, fileMatches);
+	void show(IFile file, int line, List<LineMatch> fileMatches) {
+		show(file, null, line, fileMatches);
 	}
 
-	private void show(IFile file, LineMatch match, List<LineMatch> fileMatches) {
+	private void show(IFile file, LineMatch match, int line, List<LineMatch> fileMatches) {
 		request++;
 		target = match;
 		targetFile = file;
+		targetLine = line;
 		matches = List.copyOf(fileMatches);
 		String content = openContent(file);
 		if (content == null && file.equals(cachedFile) && file.getModificationStamp() == cachedStamp) {
@@ -344,7 +348,8 @@ final class PreviewPane {
 
 		try {
 			int line = targetStart >= 0 ? document.getLineOfOffset(targetStart)
-					: match != null ? Math.min(match.getLineNumber() - 1, document.getNumberOfLines() - 1) : 0;
+					: match != null ? Math.min(match.getLineNumber() - 1, document.getNumberOfLines() - 1)
+							: Math.max(0, Math.min(targetLine - 1, document.getNumberOfLines() - 1));
 			targetLineOffset = document.getLineOffset(line);
 		} catch (BadLocationException e) {
 			targetLineOffset = -1;

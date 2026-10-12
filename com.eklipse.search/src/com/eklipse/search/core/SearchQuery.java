@@ -66,8 +66,10 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 				|| !hasSameScope(other) || wildcards != other.wildcards || fileNames != other.fileNames) {
 			return false;
 		}
-		// a file found by its path needn't have found anything in the previous search
-		if (fileNames && other.isFilePath()) {
+		// a file found by its path needn't have found anything in the previous search, nor one found by a camel case
+		// abbreviation unless only more was typed at its end: ACV matches AdaptiveCardVariables, CV doesn't
+		if (fileNames && (other.fileReference() != null
+				|| other.isCamelCase() && !other.text.regionMatches(!caseSensitive, 0, text, 0, text.length()))) {
 			return false;
 		}
 		if (wildcards && (text.replace("*", "").isEmpty() || text.indexOf('\\') >= 0
@@ -84,13 +86,34 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 	}
 
 	/**
-	 * Tells whether the text looks like the path of a file, e.g. {@code src/main/java/Foo.java} copied from a diff, so
-	 * the files are found by their path rather than their name, see {@link TextSearcher#searchPath}.
-	 *
-	 * @return {@code true} if the text is a plain text with a slash, not ending with one
+	 * @return the file the text refers to, like a path or a stack trace line, {@code null} if it doesn't look like one
+	 *         or isn't a plain text
 	 */
-	public boolean isFilePath() {
-		return !regex && text.indexOf('/') >= 0 && !text.endsWith("/") && !(wildcards && text.indexOf('*') >= 0);
+	public FileReference fileReference() {
+		return regex || wildcards && text.indexOf('*') >= 0 ? null : FileReference.parse(text);
+	}
+
+	/**
+	 * Tells whether the text may be a camel case abbreviation of a file name, like {@code AdaCarCss} or {@code ACV} for
+	 * {@code AdaptiveCardCssVariables.java}, see {@link FileNameSearch#camelCaseMatch}.
+	 *
+	 * @return {@code true} for a text of letters and digits starting with an upper case letter, with another one
+	 */
+	public boolean isCamelCase() {
+		if (regex || text.length() < 2 || !Character.isUpperCase(text.charAt(0))) {
+			return false;
+		}
+		int upperCase = 0;
+		for (int i = 0; i < text.length(); i++) {
+			char c = text.charAt(i);
+			if (!Character.isLetterOrDigit(c)) {
+				return false;
+			}
+			if (Character.isUpperCase(c)) {
+				upperCase++;
+			}
+		}
+		return upperCase >= 2;
 	}
 
 	/**

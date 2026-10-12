@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -124,38 +125,50 @@ class WorkspaceSearchTest {
 	void fileNamesMatchInTheSameScope() {
 		SearchQuery query = new SearchQuery("JAVA", false, false, false, "", "node_modules", true);
 		List<String> names = new ArrayList<>();
-		MultiStatus status = new MultiStatus(getClass(), 0, "");
-		IFile[] files = new ScopeFiles().get(query, WorkspaceSearchScope.of(query), status);
 
-		TextSearcher.searchNames(files, query.createPattern(),
-				name -> names.add(name.getFile().getFullPath().makeRelative() + ":" + name.getStart() + "-" + name.getEnd()),
+		FileNameSearch.search(scopeFiles(), query, query.createPattern(), name -> names.add(
+				name.getFile().getFullPath().makeRelative() + Arrays.toString(name.getHighlights())),
 				new NullProgressMonitor());
 
 		// not the derived target/Gen.java, Nested.java once
 		names.sort(null);
-		assertEquals(List.of("search-nested/Nested.java:7-11", "search-test/src/Foo.java:4-8"), names);
+		assertEquals(List.of("search-nested/Nested.java[7, 11]", "search-test/src/Foo.java[4, 8]"), names);
 	}
 
 	@Test
-	void pathsFindTheFilesWithTheMostMatchingFolders() throws CoreException {
+	void referencesFindTheFilesWithTheMostMatchingFolders() throws CoreException {
 		createFile("web/Foo.java", JAVA);
-		SearchQuery query = new SearchQuery("x", false, false, false, "", "node_modules", true);
-		IFile[] files = new ScopeFiles().get(query, WorkspaceSearchScope.of(query), new MultiStatus(getClass(), 0, ""));
+		IFile[] files = scopeFiles();
 
-		assertEquals(List.of("search-test/src/Foo.java"), findPath(files, "repository/SRC/foo.java"),
+		assertEquals(List.of("search-test/src/Foo.java"), findNames(files, "repository/SRC/foo.java"),
 				"relative to somewhere else, ignoring the case");
 		assertEquals(List.of("search-test/web/Foo.java"),
-				findPath(files, project.getFile("web/Foo.java").getLocation().toString()), "absolute");
+				findNames(files, project.getFile("web/Foo.java").getLocation().toString()), "absolute");
 		// the folder of the nested project is in the path, not in the workspace path search-nested/Nested.java
-		assertEquals(List.of("search-nested/Nested.java"), findPath(files, "search-test/module/Nested.java"));
-		assertEquals(List.of("search-test/src/Foo.java", "search-test/web/Foo.java"), findPath(files, "moved/Foo.java"),
-				"all files with the name if no folder matches");
+		assertEquals(List.of("search-nested/Nested.java"), findNames(files, "search-test/module/Nested.java"));
+		assertEquals(List.of("search-test/src/Foo.java", "search-test/web/Foo.java"),
+				findNames(files, "moved/Foo.java"), "all files with the name if no folder matches");
+		assertEquals(List.of("search-test/src/Foo.java"), findNames(files, "src.Foo"), "a class");
+		assertEquals(List.of("search-test/src/Foo.java:2"),
+				findNames(files, "\tat src.Foo.main(Foo.java:2) ~[classes/:na]"), "a stack trace line");
+		assertEquals(List.of("search-test/web/Foo.java:2"),
+				findNames(files, "https://git.example.com/repo/-/blob/main/web/Foo.java?ref_type=heads#L2"), "a link");
 	}
 
-	private static List<String> findPath(IFile[] files, String path) {
+	private IFile[] scopeFiles() {
+		SearchQuery query = new SearchQuery("x", false, false, false, "", "node_modules", true);
+		return new ScopeFiles().get(query, WorkspaceSearchScope.of(query), new MultiStatus(getClass(), 0, ""));
+	}
+
+	/**
+	 * @return the files found by their name, with the line they're referred to with, sorted
+	 */
+	private static List<String> findNames(IFile[] files, String text) {
+		SearchQuery query = new SearchQuery(text, false, false, false, "", "node_modules", true, false, true);
 		List<String> found = new ArrayList<>();
-		TextSearcher.searchPath(files, path, false,
-				name -> found.add(name.getFile().getFullPath().makeRelative().toString()), new NullProgressMonitor());
+		FileNameSearch.search(files, query, query.createPattern(), name -> found.add(
+				name.getFile().getFullPath().makeRelative() + (name.getLine() > 0 ? ":" + name.getLine() : "")),
+				new NullProgressMonitor());
 		found.sort(null);
 		return found;
 	}

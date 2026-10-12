@@ -25,8 +25,14 @@ class SearchQueryTest {
 		assertFalse(query("sms", false, false).isNarrowedBy(new SearchQuery("smsS", false, false, false, "*.java", "",
 				true)), "other files");
 		// Foo.java is found by its path, it needn't contain Foo
-		assertFalse(new SearchQuery("Foo", false, false, false, "", "", true, false, true).isNarrowedBy(
-				new SearchQuery("src/Foo.java", false, false, false, "", "", true, false, true)), "a path");
+		assertFalse(names("Foo").isNarrowedBy(names("src/Foo.java")), "a path");
+		// ACV matches AdaptiveCardVariables, CV doesn't
+		assertFalse(names("CV").isNarrowedBy(names("ACV")), "a camel case abbreviation");
+		assertTrue(names("AC").isNarrowedBy(names("ACV")), "more typed at its end");
+	}
+
+	private static SearchQuery names(String text) {
+		return new SearchQuery(text, false, false, false, "", "", true, false, true);
 	}
 
 	@Test
