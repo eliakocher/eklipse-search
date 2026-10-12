@@ -47,7 +47,7 @@ Updates*: it consults every enabled update site, with the same effect as leaving
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.9-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.10-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -70,10 +70,10 @@ Updates*: it consults every enabled update site, with the same effect as leaving
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.9-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.10-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.9-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.10-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -93,6 +93,14 @@ Updates*: it consults every enabled update site, with the same effect as leaving
   takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
   searches the files that already had matches, and the previous results stay until the new ones arrive. The first
   result is selected, `Enter` in the search field opens it
+- Files whose name matches are listed on top before the content search is done, so a file name and `Enter` open the
+  file like *Open Resource* (*Search File Names* in the view's ⋮ menu, on by default). Camel case abbreviations work
+  too: `AdaCarCss` or `ACCV` finds `AdaptiveCardCssVariables.java`
+- Paste what you copied to find the file: a path (absolute or relative to anywhere, e.g. from a diff or a GitLab
+  link), a class (`com.acme.Foo`, `com.acme.Foo#run`) or a stack trace line (`at com.acme.Foo.run(Foo.java:42)`); of
+  the files with that name, those with the most matching folders are listed. With a line (`Foo.java:42`,
+  `Foo.java#L42`) `Enter` opens the file there. A pasted text is searched at once without the typing delay, spaces and
+  line breaks around it are dropped
 - **Aa** match case, **ab** whole word next to the search field, *Use Regular Expression* in the view's ⋮ menu
 - Replace field (toggle with the chevron, together with *Include* and *Exclude*) with **AB** preserve case and **Replace All**
   - matches are previewed as ~~old~~new in the results
