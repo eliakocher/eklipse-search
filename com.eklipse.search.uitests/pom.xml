@@ -7,7 +7,7 @@
 	<parent>
 		<groupId>com.eklipse</groupId>
 		<artifactId>search-parent</artifactId>
-		<version>1.0.11-SNAPSHOT</version>
+		<version>1.0.12-SNAPSHOT</version>
 	</parent>
 
 	<!-- Opens a real workbench window: run with ./mvnw verify -Pui-tests -->
@@ -16,6 +16,8 @@
 
 	<properties>
 		<ui.test.vmargs></ui.test.vmargs>
+		<!-- true replaces the timings the performance tests compare with, see PerformanceMetrics -->
+		<performance.updateBaseline>false</performance.updateBaseline>
 	</properties>
 
 	<profiles>
@@ -76,6 +78,9 @@
 					<argLine>${ui.test.vmargs}</argLine>
 					<systemProperties>
 						<screenshots>${project.build.directory}/screenshots</screenshots>
+						<performance.baseline>${project.basedir}/performance-baseline.properties</performance.baseline>
+						<performance.results>${project.build.directory}/performance.properties</performance.results>
+						<performance.updateBaseline>${performance.updateBaseline}</performance.updateBaseline>
 					</systemProperties>
 				</configuration>
 			</plugin>

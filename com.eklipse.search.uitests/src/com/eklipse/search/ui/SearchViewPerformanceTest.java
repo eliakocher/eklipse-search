@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,13 +25,19 @@ import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Tree;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.part.FileEditorInput;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.eklipse.search.core.FileMatch;
+import com.eklipse.search.core.LineMatch;
+
 /**
  * Measures how long the UI thread is blocked while typing a query that matches a lot, which is what makes macOS show
- * the spinning wheel.
+ * the spinning wheel, and how long the view takes; both are compared with the timings measured before, see
+ * {@link PerformanceMetrics}.
  */
 class SearchViewPerformanceTest {
 
@@ -40,6 +47,8 @@ class SearchViewPerformanceTest {
 	private static final long MAX_ALLOWED_STALL_MS = 250;
 	/** Expand All is a single click, a moment is fine (about 350 ms on an M5 Pro), the spinning wheel is not. */
 	private static final long MAX_ALLOWED_EXPAND_ALL_MS = 1000;
+	/** Results gone through with ↓ in the temporary tab. */
+	private static final int TEMPORARY_TAB_RESULTS = 20;
 
 	private IProject project;
 	private IWorkbenchPage page;
@@ -77,14 +86,22 @@ class SearchViewPerformanceTest {
 		view.getReplaceText().setText("");
 		view.getIncludeField().setText("");
 		view.getSearchText().setText("");
+		view.setPreviewVisible(true);
+		view.setSelectFirstResult(true);
 		drain(500);
 	}
 
 	@AfterEach
 	void tearDown() throws CoreException {
 		measuring = false;
+		page.closeAllEditors(false);
 		page.hideView(view);
 		project.delete(true, true, null);
+	}
+
+	@AfterAll
+	static void saveTimings() throws IOException {
+		PerformanceMetrics.save();
 	}
 
 	@Test
@@ -100,8 +117,9 @@ class SearchViewPerformanceTest {
 		long totalMs = (System.nanoTime() - start) / 1_000_000;
 		measuring = false;
 		long stallMs = maxStallNanos / 1_000_000;
-		System.out.println("PERF typing '" + query + "': " + view.getSummary() + ", total " + totalMs
-				+ " ms, longest UI freeze " + stallMs + " ms");
+		System.out.println("PERF typing '" + query + "': " + view.getSummary());
+		PerformanceMetrics.record("typing.total", totalMs);
+		PerformanceMetrics.record("typing.longestFreeze", stallMs);
 		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
 	}
 
@@ -116,8 +134,8 @@ class SearchViewPerformanceTest {
 		drain(200);
 		measuring = false;
 		long stallMs = maxStallNanos / 1_000_000;
-		System.out.println("PERF expand all of " + view.getSummary() + ": total "
-				+ (System.nanoTime() - start) / 1_000_000 + " ms, longest UI freeze " + stallMs + " ms");
+		PerformanceMetrics.record("expandAll.total", (System.nanoTime() - start) / 1_000_000);
+		PerformanceMetrics.record("expandAll.longestFreeze", stallMs);
 		assertTrue(stallMs < MAX_ALLOWED_EXPAND_ALL_MS, "UI was blocked for " + stallMs + " ms");
 	}
 
@@ -134,7 +152,8 @@ class SearchViewPerformanceTest {
 		long start = System.nanoTime();
 		tree.notifyListeners(SWT.KeyDown, delete);
 		long dismissMs = (System.nanoTime() - start) / 1_000_000;
-		System.out.println("PERF dismiss " + selected + " selected results: " + dismissMs + " ms");
+		System.out.println("PERF dismiss " + selected + " selected results");
+		PerformanceMetrics.record("dismiss.total", dismissMs);
 		assertEquals(0, view.getResult().getMatchCount());
 		// SWT on macOS restores the whole selection for every disposed item: this took 3 minutes
 		assertTrue(dismissMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + dismissMs + " ms");
@@ -167,9 +186,70 @@ class SearchViewPerformanceTest {
 		drain(200);
 		measuring = false;
 		long stallMs = maxStallNanos / 1_000_000;
-		System.out.println("PERF preview of a " + code.length() / 1000 + " KB Java file: total "
-				+ (System.nanoTime() - start) / 1_000_000 + " ms, longest UI freeze " + stallMs + " ms");
+		PerformanceMetrics.record("previewBigJavaFile.total", (System.nanoTime() - start) / 1_000_000);
+		PerformanceMetrics.record("previewBigJavaFile.longestFreeze", stallMs);
 		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	@Test
+	void previewingLongLinesKeepsTheUiResponsive() throws CoreException {
+		// like a base64 image in a test: lines a bit shorter than the ones the preview shortens and doesn't color
+		String chunk = "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4";
+		StringBuilder code = new StringBuilder("package wide;\n\n/** Generated. */\npublic class Wide {\n");
+		for (int i = 0; i < 40; i++) {
+			code.append("\tprivate static final String IMAGE_").append(i).append(" = \"data:image/png;base64,")
+					.append(chunk.repeat(19_000 / chunk.length())).append("\";\n");
+		}
+		code.append("\tpublic void needle() {}\n}\n");
+		IFile wide = project.getFile("src/Wide.java");
+		wide.create(new ByteArrayInputStream(code.toString().getBytes(StandardCharsets.UTF_8)), true, null);
+		view.activateSearch("needle");
+		waitUntil(() -> !view.isSearching(), 60_000);
+		StyledText preview = view.getPreview().getTextWidget();
+
+		startMeasuring();
+		long start = System.nanoTime();
+		view.getViewer().setSelection(new StructuredSelection(view.getResult().get(wide).getMatches().get(0)), true);
+		// colored, the static fields in italic by the semantic highlighting, which may be done before the code
+		// scanners' colors are seen here
+		int field = code.indexOf("IMAGE_0");
+		waitUntil(() -> preview.getCharCount() > 0 && preview.getStyleRangeAtOffset(field) != null
+				&& (preview.getStyleRangeAtOffset(field).fontStyle & SWT.ITALIC) != 0, 60_000);
+		drain(200);
+		measuring = false;
+		long stallMs = maxStallNanos / 1_000_000;
+		PerformanceMetrics.record("previewLongLines.total", (System.nanoTime() - start) / 1_000_000);
+		PerformanceMetrics.record("previewLongLines.longestFreeze", stallMs);
+		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	@Test
+	void goingThroughResultsInTheTemporaryTabKeepsTheUiResponsive() {
+		view.setTemporaryTab(true);
+		view.activateSearch("sendSms");
+		waitUntil(() -> !view.isSearching(), 60_000);
+		Tree tree = view.getViewer().getTree();
+		// the first Java editor of the session loads the Java tooling, that's not what's measured
+		showInTemporaryTab((FileMatch) tree.getItem(0).getData());
+
+		startMeasuring();
+		long start = System.nanoTime();
+		for (int i = 1; i <= TEMPORARY_TAB_RESULTS; i++) {
+			showInTemporaryTab((FileMatch) tree.getItem(i).getData());
+		}
+		measuring = false;
+		long stallMs = maxStallNanos / 1_000_000;
+		PerformanceMetrics.record("temporaryTab.perResult",
+				(System.nanoTime() - start) / 1_000_000 / TEMPORARY_TAB_RESULTS);
+		PerformanceMetrics.record("temporaryTab.longestFreeze", stallMs);
+		assertEquals(1, page.getEditorReferences().length, "the tab is reused");
+		assertTrue(stallMs < MAX_ALLOWED_STALL_MS, "UI was blocked for " + stallMs + " ms");
+	}
+
+	private void showInTemporaryTab(FileMatch fileMatch) {
+		LineMatch match = fileMatch.getMatches().get(0);
+		view.getViewer().setSelection(new StructuredSelection(match), true);
+		waitUntil(() -> page.findEditor(new FileEditorInput(match.getFile())) != null, 10_000);
 	}
 
 	private void startMeasuring() {

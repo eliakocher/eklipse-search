@@ -189,6 +189,8 @@ public class SearchView extends ViewPart {
 	private static final String KEY_REPLACE_VISIBLE = "replaceVisible";
 	private static final String KEY_PREVIEW = "preview";
 	private static final String KEY_PREVIEW_WEIGHTS = "previewWeights";
+	private static final String KEY_TEMPORARY_TAB = "temporaryTab";
+	private static final String KEY_SELECT_FIRST = "selectFirstResult";
 
 	private static final ILog LOG = ILog.of(SearchView.class);
 
@@ -220,12 +222,15 @@ public class SearchView extends ViewPart {
 	private PreviewPane preview;
 	private EmptyState emptyState;
 	private EditorMatchMarks editorMarks;
+	private TemporaryEditor temporaryEditor;
 
 	private Action refreshAction;
 	private Action clearAction;
 	private Action expandAllAction;
 	private Action collapseAllAction;
 	private Action previewAction;
+	private Action temporaryTabAction;
+	private Action selectFirstAction;
 	private Action regexAction;
 	private Action derivedAction;
 	private Action wildcardAction;
@@ -352,6 +357,7 @@ public class SearchView extends ViewPart {
 		createSummary(body);
 		createViewer(body);
 		editorMarks = new EditorMatchMarks(getSite().getPage(), () -> result);
+		temporaryEditor = new TemporaryEditor(getSite().getPage());
 		createActions();
 		contributeToActionBars();
 		activateShortcuts();
@@ -681,6 +687,26 @@ public class SearchView extends ViewPart {
 		if (previewImage != null) {
 			previewAction.setImageDescriptor(previewImage);
 		}
+		temporaryTabAction = new Action("Open in Temporary Tab", IAction.AS_CHECK_BOX) {
+			@Override
+			public void run() {
+				setTemporaryTab(isChecked());
+				// not to leave a click opening a tab for good
+				if (!isChecked()) {
+					setPreviewVisible(true);
+				}
+			}
+		};
+		temporaryTabAction.setToolTipText(
+				"Open in Temporary Tab: a click on a result shows its file in an editor tab the next result reuses, like the preview editor of VS Code. A double-click, an edit or Pin Editor keeps the tab.");
+		selectFirstAction = new Action("Select First Result", IAction.AS_CHECK_BOX) {
+			@Override
+			public void run() {
+				setSelectFirstResult(isChecked());
+			}
+		};
+		selectFirstAction.setToolTipText(
+				"Select First Result: the first result of a search is selected and shown. When off, Enter in the search field still opens it.");
 		openAction = createAction("Open", null, () -> openSelection(true));
 		replaceSelectionAction = createAction("Replace", null, () -> replace(selectedMatches(), false));
 		// the preview is read-only: Delete there must not dismiss the selected results
@@ -764,6 +790,8 @@ public class SearchView extends ViewPart {
 		menu.add(derivedAction);
 		menu.add(new Separator());
 		menu.add(previewAction);
+		menu.add(temporaryTabAction);
+		menu.add(selectFirstAction);
 
 		// Copy, Delete and Select All work on the fields while they have focus, on the results otherwise
 		FieldActionHandler fieldActionHandler = new FieldActionHandler(bars, copyAction, dismissAction,
@@ -1022,12 +1050,14 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Shows or hides the preview. Without it, a click on a match opens the editor instead.
+	 * Shows or hides the preview. Without it, a click on a match opens the editor instead, in the temporary tab if
+	 * that's on. The preview turns the temporary tab off, both would show the same.
 	 */
 	void setPreviewVisible(boolean visible) {
 		previewAction.setChecked(visible);
 		resultSash.setMaximizedControl(visible ? null : viewer.getControl());
 		if (visible) {
+			setTemporaryTab(false);
 			updatePreview();
 		} else {
 			display.timerExec(-1, previewTrigger);
@@ -1035,15 +1065,48 @@ public class SearchView extends ViewPart {
 		}
 	}
 
+	/**
+	 * Shows the selected result in an editor tab the next one reuses, instead of the preview, or stops to. Show Preview
+	 * can't be turned on meanwhile.
+	 */
+	void setTemporaryTab(boolean on) {
+		temporaryTabAction.setChecked(on);
+		previewAction.setEnabled(!on);
+		if (on) {
+			setPreviewVisible(false);
+			schedulePreview();
+		} else {
+			// what it shows stays open like any other tab
+			temporaryEditor.keep();
+		}
+	}
+
+	/**
+	 * Selects the first result of each search or leaves the results unselected until one is picked.
+	 */
+	void setSelectFirstResult(boolean select) {
+		selectFirstAction.setChecked(select);
+		if (select) {
+			selectFirstResult();
+		}
+	}
+
 	private void schedulePreview() {
-		if (isPreviewVisible()) {
+		if (isPreviewVisible() || temporaryTabAction.isChecked()) {
 			display.timerExec(-1, previewTrigger);
 			display.timerExec(PREVIEW_DELAY_MS, previewTrigger);
 		}
 	}
 
 	private void updatePreview() {
-		if (isDisposed() || !isPreviewVisible()) {
+		if (isDisposed()) {
+			return;
+		}
+		if (temporaryTabAction.isChecked()) {
+			showInTemporaryTab();
+			return;
+		}
+		if (!isPreviewVisible()) {
 			return;
 		}
 		Object first = viewer.getStructuredSelection().getFirstElement();
@@ -1054,14 +1117,39 @@ public class SearchView extends ViewPart {
 					fileMatch != null ? fileMatch.getMatches() : List.of());
 			return;
 		}
-		LineMatch target = first instanceof LineMatch match ? match
-				: first instanceof FileMatch fileMatch && fileMatch.getMatchCount() > 0 ? fileMatch.getMatches().get(0)
-						: null;
+		LineMatch target = targetMatch(first);
 		FileMatch fileMatch = target != null ? result.get(target.getFile()) : null;
 		if (fileMatch != null) {
 			preview.show(target, fileMatch.getMatches());
 		} else {
 			preview.clear();
+		}
+	}
+
+	/**
+	 * @return the match a result stands for, of a file its first one, {@code null} for none
+	 */
+	private static LineMatch targetMatch(Object element) {
+		return element instanceof LineMatch match ? match
+				: element instanceof FileMatch fileMatch && fileMatch.getMatchCount() > 0 ? fileMatch.getMatches().get(0)
+						: null;
+	}
+
+	/**
+	 * Shows the selected result in the temporary tab, the focus stays in the view.
+	 */
+	private void showInTemporaryTab() {
+		Object first = viewer.getStructuredSelection().getFirstElement();
+		LineMatch target = targetMatch(first);
+		try {
+			if (first instanceof FileNameMatch nameMatch) {
+				reveal(temporaryEditor.show(nameMatch.getFile()), nameMatch);
+			} else if (target != null) {
+				reveal(temporaryEditor.show(target.getFile()), target);
+			}
+		} catch (PartInitException e) {
+			// no dialog for a mere selection, a double-click shows the error
+			LOG.warn("Could not show " + (target != null ? target.getFile().getFullPath() : first), e);
 		}
 	}
 
@@ -1701,10 +1789,16 @@ public class SearchView extends ViewPart {
 	// ---------------------------------------------------------------------------------------------------- results
 
 	/**
-	 * Without the preview pane, a click opens the match in an editor without activating it, like in VS Code.
+	 * Without the preview pane, a click opens the match in an editor without activating it, like in VS Code: in the
+	 * temporary tab, which follows the selection, or for good.
 	 */
 	private void previewOnClick(Event e) {
 		if (isPreviewVisible() || e.button != 1 || e.count != 1 || (e.stateMask & SWT.MODIFIER_MASK) != 0) {
+			return;
+		}
+		if (temporaryTabAction.isChecked()) {
+			// a click on the selected result shows it again, e.g. after its tab was closed
+			schedulePreview();
 			return;
 		}
 		TreeItem item = viewer.getTree().getItem(new Point(e.x, e.y));
@@ -1738,7 +1832,7 @@ public class SearchView extends ViewPart {
 		if (s == null) {
 			return;
 		}
-		if (s.shown && !viewer.getSelection().isEmpty()) {
+		if (s.shown && (!viewer.getSelection().isEmpty() || nextResult(viewer.getTree(), null) != null)) {
 			openSelectedResult();
 		} else {
 			s.openWhenDone = true;
@@ -1746,9 +1840,17 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * Opens the selected result in an editor and activates it, a file at its first match.
+	 * Opens the selected result in an editor and activates it, a file at its first match. Without a selection, the
+	 * first result is selected and opened.
 	 */
 	private void openSelectedResult() {
+		if (viewer.getSelection().isEmpty()) {
+			TreeItem first = nextResult(viewer.getTree(), null);
+			if (first == null) {
+				return;
+			}
+			viewer.setSelection(new StructuredSelection(first.getData()), true);
+		}
 		if (viewer.getStructuredSelection().getFirstElement() instanceof FileMatch fileMatch
 				&& fileMatch.getMatchCount() > 0) {
 			open(fileMatch.getMatches().get(0), true);
@@ -1759,9 +1861,12 @@ public class SearchView extends ViewPart {
 
 	/**
 	 * Keeps the first result selected like in Open Resource, so Enter in the search field opens it, until another one
-	 * is selected.
+	 * is selected. Not with Select First Result off, Enter then selects it.
 	 */
 	private void selectFirstResult() {
+		if (!selectFirstAction.isChecked()) {
+			return;
+		}
 		IStructuredSelection selection = viewer.getStructuredSelection();
 		if (!selection.isEmpty() && (selection.size() > 1 || selection.getFirstElement() != autoSelected)) {
 			return;
@@ -1864,7 +1969,10 @@ public class SearchView extends ViewPart {
 	}
 
 	private void open(LineMatch match, boolean activate) {
-		IEditorPart editor = open(match.getFile(), activate);
+		reveal(open(match.getFile(), activate), match);
+	}
+
+	private static void reveal(IEditorPart editor, LineMatch match) {
 		ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
 		if (textEditor != null) {
 			textEditor.selectAndReveal(match.getOffset(), match.getLength());
@@ -1875,7 +1983,10 @@ public class SearchView extends ViewPart {
 	 * Opens a file found by its name, at the line it was referred to with.
 	 */
 	private void open(FileNameMatch nameMatch, boolean activate) {
-		IEditorPart editor = open(nameMatch.getFile(), activate);
+		reveal(open(nameMatch.getFile(), activate), nameMatch);
+	}
+
+	private static void reveal(IEditorPart editor, FileNameMatch nameMatch) {
 		ITextEditor textEditor = Adapters.adapt(editor, ITextEditor.class);
 		if (textEditor == null || nameMatch.getLine() <= 0) {
 			return;
@@ -1891,11 +2002,15 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
+	 * Opens a file for good, also when it's shown in the temporary tab.
+	 *
 	 * @return the editor, {@code null} if it couldn't be opened
 	 */
 	private IEditorPart open(IFile file, boolean activate) {
 		try {
-			return IDE.openEditor(getSite().getPage(), file, activate);
+			IEditorPart editor = IDE.openEditor(getSite().getPage(), file, activate);
+			temporaryEditor.keep(editor);
+			return editor;
 		} catch (PartInitException e) {
 			ErrorDialog.openError(getSite().getShell(), TITLE, "Could not open " + file.getName(), e.getStatus());
 			return null;
@@ -2345,6 +2460,8 @@ public class SearchView extends ViewPart {
 		updateReplaceToggle(replaceVisible);
 		resultSash.setWeights(weights(string(m, KEY_PREVIEW_WEIGHTS, null)));
 		setPreviewVisible(bool(m, KEY_PREVIEW, true));
+		setTemporaryTab(bool(m, KEY_TEMPORARY_TAB, true));
+		selectFirstAction.setChecked(bool(m, KEY_SELECT_FIRST, true));
 	}
 
 	private static int[] weights(String value) {
@@ -2385,6 +2502,8 @@ public class SearchView extends ViewPart {
 		m.putBoolean(KEY_FILE_NAMES, fileNamesAction.isChecked());
 		m.putBoolean(KEY_REPLACE_VISIBLE, isReplaceVisible());
 		m.putBoolean(KEY_PREVIEW, isPreviewVisible());
+		m.putBoolean(KEY_TEMPORARY_TAB, temporaryTabAction.isChecked());
+		m.putBoolean(KEY_SELECT_FIRST, selectFirstAction.isChecked());
 		int[] weights = resultSash.getWeights();
 		m.putString(KEY_PREVIEW_WEIGHTS, weights[0] + "," + weights[1]);
 	}
@@ -2413,6 +2532,9 @@ public class SearchView extends ViewPart {
 		session = null;
 		if (editorMarks != null) {
 			editorMarks.dispose();
+		}
+		if (temporaryEditor != null) {
+			temporaryEditor.dispose();
 		}
 		if (undoHandler != null) {
 			undoHandler.dispose();

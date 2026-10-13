@@ -47,7 +47,7 @@ Updates*: it consults every enabled update site, with the same effect as leaving
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.11-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.12-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -70,10 +70,10 @@ Updates*: it consults every enabled update site, with the same effect as leaving
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.11-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.12-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.11-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.12-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 
@@ -92,7 +92,8 @@ Updates*: it consults every enabled update site, with the same effect as leaving
 - Search as you type across all open projects, results stream in while the search runs, with a progress bar when it
   takes a moment; once done, the time it took shows next to the result count. Like Quick Search, typing more only
   searches the files that already had matches, and the previous results stay until the new ones arrive. The first
-  result is selected, `Enter` in the search field opens it
+  result is selected, `Enter` in the search field opens it (with *Select First Result* off in the view's ⋮ menu,
+  nothing is selected until you pick a result, `Enter` still opens the first one)
 - Files whose name matches are listed on top before the content search is done, so a file name and `Enter` open the
   file like *Open Resource* (*Search File Names* in the view's ⋮ menu, on by default). Camel case abbreviations work
   too: `AdaCarCss` or `ACCV` finds `AdaptiveCardCssVariables.java`
@@ -113,9 +114,12 @@ Updates*: it consults every enabled update site, with the same effect as leaving
   the build output Eclipse marks as derived, e.g. Maven `target/` folders (on by default). The view remembers what
   you enter there, and the search options, across restarts. Both are combo boxes: the arrow in the field lists the
   last 15 values you used there, a value counts once you leave the field or press `Enter`
-- Preview like Quick Search: a click on a result shows its file below the results, with the line of the match
-  highlighted and all matches marked; a double-click or `Enter` opens it. Switch it off with *Show Preview* in the
-  view's ⋮ menu, then a click opens the editor right away, like in VS Code
+- The selected result shows in the editor area, in one tab the next result reuses and whose title is in italic, like
+  the preview editor of VS Code; a double-click or `Enter`, an edit or *Pin Editor* keeps the tab. The focus stays in
+  the view
+- Or a preview like Quick Search: with *Open in Temporary Tab* off in the view's ⋮ menu, a click on a result shows
+  its file below the results, with the line of the match highlighted and all matches marked; a double-click or
+  `Enter` opens it. With *Show Preview* off as well, a click opens the editor right away
 - Syntax highlighting in the preview, with what the installed Eclipse has: Java files in the colors of the Java
   editor (JDT), including the semantic highlighting of fields, static members, local variables and so on, which
   follows a moment later once the file is parsed in the background; other languages with the TextMate grammars of
@@ -151,14 +155,14 @@ entry and the plugin in *Installation Details* **Eklipse Search**.
 | Open a result from the search field | `Enter` opens the selected result, the first one unless `↓` / `↑` (or `Page Down` / `Page Up`) picked another, like in *Open Resource*; the focus stays in the field while you pick |
 | Previous searches | `Alt+↑` / `Alt+↓` (`⌥` on macOS) in the search field, the last 10 like in a terminal (a search counts once it's done) |
 | Reuse an include/exclude pattern | the arrow in the field |
-| Preview a match | click it: the file shows below the results. With *Show Preview* off, it opens in the editor without leaving the view |
+| Preview a match | click it: the file shows in a tab the next match reuses. With *Open in Temporary Tab* off, it shows below the results; with *Show Preview* off too, it opens in the editor. All without leaving the view |
 | Open a match | double-click or `Enter` |
 | Dismiss | `Delete` / `Backspace` |
 | Replace all | *Replace All* or `Ctrl+Enter` / `Cmd+Enter` in the replace field |
 | Replace some | select matches or files, context menu *Replace* (while the replace field is shown) |
 | Copy | `Ctrl+C` / `Cmd+C` copies the selected results with line numbers (in the preview: the selected text), context menu *Copy Path* copies file paths |
 | Search again, clear (also empties the replace field), expand / collapse all | the view's toolbar |
-| Regular expression, skip derived resources, show preview | the view's ⋮ menu |
+| Regular expression, skip derived resources, show preview, temporary tab, select first result | the view's ⋮ menu |
 
 The view opens on the right, stacked with the Outline, in a fresh perspective (or after *Window > Perspective > Reset
 Perspective*). Otherwise drag its tab to the side you like once, Eclipse remembers the position.
@@ -188,6 +192,11 @@ Needs Java 21 to run the build, Maven is downloaded by the wrapper. On Windows u
                                               # and TM4E for the preview colors) and checks that typing a query with
                                               # 20 000 results or previewing a big Java file doesn't freeze the UI;
                                               # screenshots end up in com.eklipse.search.uitests/target/screenshots
+./mvnw verify -Pui-tests -Dperformance.updateBaseline=true
+                                              # the performance tests fail when a timing is over twice the one in
+                                              # com.eklipse.search.uitests/performance-baseline.properties; this
+                                              # replaces those after a slowdown that's worth it (a new timing is
+                                              # added by any run), the last run's are in target/performance.properties
 ./mvnw verify -Declipse.release=2026-09 -Dbuild.ee=JavaSE-21
                                               # build and test against a newer Eclipse release (needs Java 21)
 ```

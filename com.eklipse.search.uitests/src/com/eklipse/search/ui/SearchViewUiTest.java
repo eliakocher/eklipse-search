@@ -44,6 +44,8 @@ import org.eclipse.jface.text.Position;
 import org.eclipse.jface.text.source.IAnnotationModel;
 import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.CTabFolder;
+import org.eclipse.swt.custom.CTabItem;
 import org.eclipse.swt.custom.StyleRange;
 import org.eclipse.swt.custom.StyledText;
 import org.eclipse.swt.graphics.GC;
@@ -59,6 +61,7 @@ import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolItem;
 import org.eclipse.swt.widgets.TreeItem;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
@@ -66,6 +69,7 @@ import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.ide.IDE;
 import org.eclipse.ui.ide.undo.WorkspaceUndoUtil;
 import org.eclipse.ui.intro.IIntroPart;
+import org.eclipse.ui.part.FileEditorInput;
 import org.eclipse.ui.texteditor.ITextEditor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -152,6 +156,7 @@ class SearchViewUiTest {
 		view.getIncludeField().setText("");
 		view.getSearchText().setText("");
 		view.setPreviewVisible(true);
+		view.setSelectFirstResult(true);
 		processEvents();
 	}
 
@@ -431,6 +436,74 @@ class SearchViewUiTest {
 	}
 
 	@Test
+	void temporaryTabIsReusedUntilKept() throws Exception {
+		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile sender = project.getFile("src/com/example/SmsSender.java");
+		IFile readme = project.getFile("docs/README.md");
+		for (IFile file : List.of(configuration, sender, readme)) {
+			IDE.setDefaultEditor(file, "org.eclipse.ui.DefaultTextEditor");
+		}
+		view.setTemporaryTab(true);
+		assertEquals(0, view.getPreview().getControl().getSize().y, "the preview is hidden");
+		view.activateSearch("sms");
+		waitForSearch();
+
+		// a click opens the result in a tab without leaving the view, the next result reuses the tab: the first one,
+		// SmsSender.java found by its name, is selected and shown by itself
+		click(view.getResult().get(configuration).getMatches().get(0));
+		waitUntil(() -> page.findEditor(new FileEditorInput(configuration)) != null, 5_000);
+		assertEquals(1, page.getEditorReferences().length, "the tab is reused");
+		IEditorPart temporary = page.findEditor(new FileEditorInput(configuration));
+		assertSame(view, page.getActivePart(), "the focus stays in the view");
+		assertTrue(isItalic(temporary), "the title of the temporary tab is in italic");
+		click(view.getResult().get(readme).getMatches().get(0));
+		waitUntil(() -> readme.equals(temporary.getEditorInput().getAdapter(IFile.class)), 5_000);
+		assertEquals(1, page.getEditorReferences().length, "the tab is reused");
+
+		// a double-click keeps the tab, the next result gets a new one
+		view.openSelectionInEditor();
+		page.activate(view);
+		click(view.getResult().get(sender).getMatches().get(0));
+		waitUntil(() -> page.getEditorReferences().length == 2, 5_000);
+		assertEquals(readme, temporary.getEditorInput().getAdapter(IFile.class), "the kept tab stays");
+		assertFalse(isItalic(temporary), "a kept tab isn't in italic");
+
+		// an edit keeps it too, unsaved changes are never closed
+		ITextEditor edited = (ITextEditor) page.findEditor(new FileEditorInput(sender));
+		edited.getDocumentProvider().getDocument(edited.getEditorInput()).replace(0, 0, "// unsaved\n");
+		click(view.getResult().get(configuration).getMatches().get(0));
+		waitUntil(() -> page.getEditorReferences().length == 3, 5_000);
+		assertTrue(edited.isDirty());
+		assertFalse(isItalic(edited), "an edited tab is kept");
+		assertTrue(isItalic(page.findEditor(new FileEditorInput(configuration))));
+
+		// a file open in a tab of its own is shown there
+		click(view.getResult().get(readme).getMatches().get(0));
+		waitUntil(() -> page.isPartVisible(temporary), 5_000);
+		assertEquals(3, page.getEditorReferences().length);
+
+		// a closed temporary tab opens again
+		page.closeEditor(page.findEditor(new FileEditorInput(configuration)), false);
+		click(view.getResult().get(configuration).getMatches().get(0));
+		waitUntil(() -> page.findEditor(new FileEditorInput(configuration)) != null, 5_000);
+		assertTrue(isItalic(page.findEditor(new FileEditorInput(configuration))));
+	}
+
+	@Test
+	void enterOpensTheFirstResultAlsoWhenItIsNotSelected() {
+		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
+		view.setSelectFirstResult(false);
+		view.activateSearch("sendSms");
+		waitForSearch();
+		assertTrue(view.getViewer().getSelection().isEmpty(), "nothing is selected");
+		view.getSearchText().notifyListeners(SWT.DefaultSelection, new Event());
+		processEvents();
+		assertEquals(configuration, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
+		assertEquals("sendSms", editorSelection().getText());
+	}
+
+	@Test
 	void picksAndOpensResultsFromTheSearchField() {
 		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
 		IFile readme = project.getFile("docs/README.md");
@@ -485,6 +558,20 @@ class SearchViewUiTest {
 		processEvents();
 		assertEquals(sender, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
 		assertEquals(2, editorSelection().getStartLine());
+	}
+
+	/**
+	 * @return whether the title of the editor's tab is in italic
+	 */
+	private static boolean isItalic(IEditorPart editor) {
+		MPart model = editor.getSite().getService(MPart.class);
+		for (CTabItem tab : ((CTabFolder) model.getParent().getWidget()).getItems()) {
+			if (tab.getData("modelElement") == model) {
+				return (tab.getFont().getFontData()[0].getStyle() & SWT.ITALIC) != 0;
+			}
+		}
+		fail("No tab for " + editor.getTitle());
+		return false;
 	}
 
 	private ITextSelection editorSelection() {
