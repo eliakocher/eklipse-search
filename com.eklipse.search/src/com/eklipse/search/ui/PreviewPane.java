@@ -75,8 +75,11 @@ final class PreviewPane {
 	private static final ILog LOG = ILog.of(PreviewPane.class);
 	/** Defined by org.eclipse.search, also used for the results, has a dark theme value. */
 	private static final String MATCH_HIGHLIGHT = "org.eclipse.search.ui.match.highlight";
-	/** Longer lines are shortened, the text widget gets slow with lines of minified code. */
-	private static final int MAX_LINE_LENGTH = 2_000;
+	/**
+	 * Longer lines are shortened, the text widget gets slow with lines of minified code; like the line length VS Code
+	 * stops coloring at, a shortened line turns off the colors.
+	 */
+	private static final int MAX_LINE_LENGTH = 20_000;
 	/** Bigger files aren't previewed. */
 	private static final int MAX_FILE_SIZE = 20 * 1024 * 1024;
 	/** Bigger files aren't colored, the Java highlighting runs in the UI thread. */

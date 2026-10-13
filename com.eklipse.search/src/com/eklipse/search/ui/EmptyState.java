@@ -136,8 +136,8 @@ final class EmptyState {
 	}
 
 	/**
-	 * @return what easily hides a match, e.g. "Searched only *.java, with match case.", {@code null} for nothing; the
-	 *         excludes are left out, they are set once and rarely the reason
+	 * @return what easily hides a match, e.g. "Searched only *.java, with match case." and "Excluded node_modules." on
+	 *         a line of its own, {@code null} for nothing
 	 */
 	private static String limits(SearchQuery query) {
 		List<String> options = new ArrayList<>();
@@ -151,20 +151,25 @@ final class EmptyState {
 			options.add("regex");
 		}
 		String includes = query.includes().trim();
-		if (includes.isEmpty() && options.isEmpty()) {
-			return null;
+		String excludes = query.excludes().trim();
+		List<String> lines = new ArrayList<>();
+		if (!includes.isEmpty() || !options.isEmpty()) {
+			StringBuilder text = new StringBuilder("Searched");
+			if (!includes.isEmpty()) {
+				text.append(" only ").append(includes);
+			}
+			if (!options.isEmpty()) {
+				text.append(includes.isEmpty() ? " with " : ", with ");
+				int last = options.size() - 1;
+				text.append(last == 0 ? options.get(0)
+						: String.join(", ", options.subList(0, last)) + " and " + options.get(last));
+			}
+			lines.add(text.append('.').toString());
 		}
-		StringBuilder text = new StringBuilder("Searched");
-		if (!includes.isEmpty()) {
-			text.append(" only ").append(includes);
+		if (!excludes.isEmpty()) {
+			lines.add("Excluded " + excludes + ".");
 		}
-		if (!options.isEmpty()) {
-			text.append(includes.isEmpty() ? " with " : ", with ");
-			int last = options.size() - 1;
-			text.append(last == 0 ? options.get(0)
-					: String.join(", ", options.subList(0, last)) + " and " + options.get(last));
-		}
-		return text.append('.').toString();
+		return lines.isEmpty() ? null : String.join("\n", lines);
 	}
 
 	private void setHover(boolean hover) {
@@ -285,24 +290,26 @@ final class EmptyState {
 	}
 
 	/**
-	 * @return the text broken into lines at spaces, each fitting into the width; a word too long for a line of its
-	 *         own, e.g. a long search text, is cut off with an ellipsis
+	 * @return the text broken into lines at line breaks and spaces, each fitting into the width; a word too long for a
+	 *         line of its own, e.g. a long search text, is cut off with an ellipsis
 	 */
 	private static List<String> wrap(GC gc, String text, int width) {
 		List<String> lines = new ArrayList<>();
-		String line = "";
-		for (String word : text.split(" ")) {
-			String longer = line.isEmpty() ? word : line + " " + word;
-			if (gc.textExtent(longer).x <= width) {
-				line = longer;
-			} else {
-				if (!line.isEmpty()) {
-					lines.add(line);
+		for (String paragraph : text.split("\n")) {
+			String line = "";
+			for (String word : paragraph.split(" ")) {
+				String longer = line.isEmpty() ? word : line + " " + word;
+				if (gc.textExtent(longer).x <= width) {
+					line = longer;
+				} else {
+					if (!line.isEmpty()) {
+						lines.add(line);
+					}
+					line = ellipsize(gc, word, width);
 				}
-				line = ellipsize(gc, word, width);
 			}
+			lines.add(line);
 		}
-		lines.add(line);
 		return lines;
 	}
 
