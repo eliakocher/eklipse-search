@@ -111,7 +111,7 @@ public final class FileNameSearch {
 	/**
 	 * Matches a camel case abbreviation: each of its words, starting with an upper case letter, is the start of a word
 	 * in the name, in the same order; words in between may be left out, the first word starts the name. So
-	 * {@code AdaCarCss} and {@code ACV} match {@code AdaptiveCardCssVariables.java}.
+	 * {@code AbsDecTex} and {@code ADE} match {@code AbstractDecoratedTextEditor.java}.
 	 *
 	 * @param abbreviation the abbreviation
 	 * @param name the file name

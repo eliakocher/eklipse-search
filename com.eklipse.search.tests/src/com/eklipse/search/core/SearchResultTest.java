@@ -15,12 +15,12 @@ class SearchResultTest {
 	void keepsTheMostRelevantNameMatches() {
 		SearchResult result = new SearchResult();
 		// searching for "Util"
-		result.addNameMatch(name("BranchStateLabelUtil.java", 16, 20), 2);
+		result.addNameMatch(name("StringUtil.java", 6, 10), 2);
 		result.addNameMatch(name("UtilTest.java", 0, 4), 2);
 
 		SearchResult.NameMatchChange change = result.addNameMatch(name("Util.java", 0, 4), 2);
 
-		assertEquals("BranchStateLabelUtil.java", change.dropped().getFile().getName());
+		assertEquals("StringUtil.java", change.dropped().getFile().getName());
 		assertNull(result.addNameMatch(name("MyUtil.java", 2, 6), 2).added(), "less relevant than the kept ones");
 		assertEquals(List.of("Util.java", "UtilTest.java"), result.getNameMatches().stream()
 				.sorted(FileNameMatch.BY_RELEVANCE).map(m -> m.getFile().getName()).toList());

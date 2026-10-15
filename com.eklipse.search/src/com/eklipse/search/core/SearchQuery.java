@@ -67,7 +67,7 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 			return false;
 		}
 		// a file found by its path needn't have found anything in the previous search, nor one found by a camel case
-		// abbreviation unless only more was typed at its end: ACV matches AdaptiveCardVariables, CV doesn't
+		// abbreviation unless only more was typed at its end: ACV matches AbstractColumnViewer, CV doesn't
 		if (fileNames && (other.fileReference() != null
 				|| other.isCamelCase() && !other.text.regionMatches(!caseSensitive, 0, text, 0, text.length()))) {
 			return false;
@@ -94,8 +94,8 @@ public record SearchQuery(String text, boolean caseSensitive, boolean wholeWord,
 	}
 
 	/**
-	 * Tells whether the text may be a camel case abbreviation of a file name, like {@code AdaCarCss} or {@code ACV} for
-	 * {@code AdaptiveCardCssVariables.java}, see {@link FileNameSearch#camelCaseMatch}.
+	 * Tells whether the text may be a camel case abbreviation of a file name, like {@code AbsDecTex} or {@code ADE} for
+	 * {@code AbstractDecoratedTextEditor.java}, see {@link FileNameSearch#camelCaseMatch}.
 	 *
 	 * @return {@code true} for a text of letters and digits starting with an upper case letter, with another one
 	 */

@@ -35,14 +35,14 @@ class FileNameSearchTest {
 
 	@Test
 	void camelCaseAbbreviations() {
-		String name = "AdaptiveCardCssVariables.java";
-		assertArrayEquals(new int[] { 0, 3, 8, 11, 12, 15 }, FileNameSearch.camelCaseMatch("AdaCarCss", name, false));
-		assertArrayEquals(new int[] { 0, 1, 8, 9, 15, 16 }, FileNameSearch.camelCaseMatch("ACV", name, false),
+		String name = "AbstractDecoratedTextEditor.java";
+		assertArrayEquals(new int[] { 0, 3, 8, 11, 17, 20 }, FileNameSearch.camelCaseMatch("AbsDecTex", name, false));
+		assertArrayEquals(new int[] { 0, 1, 8, 9, 21, 22 }, FileNameSearch.camelCaseMatch("ADE", name, false),
 				"words left out");
-		assertArrayEquals(new int[] { 0, 3, 12, 14 }, FileNameSearch.camelCaseMatch("AdaCa", "AdaptiveCoreCard.java",
-				false), "the next word if one doesn't fit");
+		assertArrayEquals(new int[] { 0, 3, 16, 19 }, FileNameSearch.camelCaseMatch("AbsDec",
+				"AbstractDocumentDecorator.java", false), "the next word if one doesn't fit");
 		assertArrayEquals(new int[] { 0, 1, 4, 5 }, FileNameSearch.camelCaseMatch("FB", "foo_bar.txt", false));
-		assertNull(FileNameSearch.camelCaseMatch("CarCss", name, false), "not starting the name");
-		assertNull(FileNameSearch.camelCaseMatch("ACX", name, false));
+		assertNull(FileNameSearch.camelCaseMatch("DecTex", name, false), "not starting the name");
+		assertNull(FileNameSearch.camelCaseMatch("ADX", name, false));
 	}
 }

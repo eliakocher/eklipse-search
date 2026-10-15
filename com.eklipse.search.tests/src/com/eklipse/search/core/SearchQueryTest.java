@@ -26,7 +26,7 @@ class SearchQueryTest {
 				true)), "other files");
 		// Foo.java is found by its path, it needn't contain Foo
 		assertFalse(names("Foo").isNarrowedBy(names("src/Foo.java")), "a path");
-		// ACV matches AdaptiveCardVariables, CV doesn't
+		// ACV matches AbstractColumnViewer, CV doesn't
 		assertFalse(names("CV").isNarrowedBy(names("ACV")), "a camel case abbreviation");
 		assertTrue(names("AC").isNarrowedBy(names("ACV")), "more typed at its end");
 	}

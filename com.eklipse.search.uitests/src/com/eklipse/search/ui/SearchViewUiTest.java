@@ -90,16 +90,16 @@ class SearchViewUiTest {
 			/**
 			 * Configuration of the SMS channel.
 			 */
-			public class ExternalMessengerConfiguration {
+			public class MessagingConfiguration {
 
 				/** Failure message when an SMS could not be sent. */
 				public static final String SMS_SENT_FAILED = "smsSentFailed";
 
-				private String smsTwilioAccountSid;
+				private String smsGatewayApiKey;
 				private String smsSender = "Acme";
 
-				public String getSmsTwilioAccountSid() {
-					return smsTwilioAccountSid;
+				public String getSmsGatewayApiKey() {
+					return smsGatewayApiKey;
 				}
 
 				public void sendSms(String message) {
@@ -113,14 +113,14 @@ class SearchViewUiTest {
 
 			public class SmsSender {
 
-				private final ExternalMessengerConfiguration configuration = new ExternalMessengerConfiguration();
+				private final MessagingConfiguration configuration = new MessagingConfiguration();
 
 				public void send(String text) {
 					configuration.sendSms(text);
 				}
 			}
 			""";
-	private static final String README = "# SMS channel\n\nThe sms channel sends messages through Twilio. See smsTwilioAccountSid.\n";
+	private static final String README = "# SMS channel\n\nThe sms channel sends messages through a gateway. See smsGatewayApiKey.\n";
 
 	private IProject project;
 	private IWorkbenchPage page;
@@ -142,7 +142,7 @@ class SearchViewUiTest {
 		project.create(description, null);
 		project.open(null);
 		project.setDefaultCharset("UTF-8", null);
-		createFile("src/com/example/ExternalMessengerConfiguration.java", CONFIGURATION);
+		createFile("src/com/example/MessagingConfiguration.java", CONFIGURATION);
 		createFile("src/com/example/SmsSender.java", SENDER);
 		createFile("docs/README.md", README);
 		createFile("target/generated.txt", "generated sms output\n");
@@ -198,14 +198,14 @@ class SearchViewUiTest {
 		waitUntil(() -> "No results found.".equals(view.getSummary()), 10_000);
 		assertFalse(view.getViewer().getTree().isVisible(), "the empty state replaces the results");
 		assertEquals(CONFIGURATION.replace("smsSentFailed", "textSentFailed")
-				.replace("smsTwilioAccountSid", "textTwilioAccountSid").replace("smsSender", "textSender"),
-				read("src/com/example/ExternalMessengerConfiguration.java"));
+				.replace("smsGatewayApiKey", "textGatewayApiKey").replace("smsSender", "textSender"),
+				read("src/com/example/MessagingConfiguration.java"));
 		assertEquals(README.replace("The sms", "The text").replace("See sms", "See text"), read("docs/README.md"));
 		screenshot(view.getRoot(), "4-after-replace");
 
 		// Edit > Undo while the view is active uses the workspace undo context
 		OperationHistoryFactory.getOperationHistory().undo(WorkspaceUndoUtil.getWorkspaceUndoContext(), null, null);
-		assertEquals(CONFIGURATION, read("src/com/example/ExternalMessengerConfiguration.java"));
+		assertEquals(CONFIGURATION, read("src/com/example/MessagingConfiguration.java"));
 		assertEquals(README, read("docs/README.md"));
 		waitUntil(() -> "6 results in 2 files".equals(view.getSummary()), 10_000);
 
@@ -258,6 +258,8 @@ class SearchViewUiTest {
 		if (!view.getReplaceText().isVisible()) {
 			toggle(view.getReplaceToggleItem());
 		}
+		view.getIncludeField().setText("*.java, *.md");
+		view.getExcludeField().setText("**/node_modules");
 		screenshot(view.getRoot(), "5-sidebar-empty");
 		view.activateSearch("sms");
 		waitForSearch();
@@ -266,7 +268,7 @@ class SearchViewUiTest {
 		Rectangle exclude = view.getExcludeField().getBounds();
 		assertEquals(include.x, exclude.x, "include and exclude start at the same edge");
 		assertEquals(include.width, exclude.width, "include and exclude end at the same edge");
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		click(view.getResult().get(configuration).getMatches().get(2));
 		waitUntil(() -> CONFIGURATION.equals(view.getPreview().getTextWidget().getText()), 5_000);
 		screenshot(view.getRoot(), "5-sidebar");
@@ -274,6 +276,10 @@ class SearchViewUiTest {
 		view.getReplaceText().setText("text");
 		waitUntil(() -> false, 300);
 		screenshot(view.getRoot(), "6-sidebar-replace");
+
+		// the picture in the README (docs/sidebar-search.png): the whole stack with the view's tab and toolbar
+		view.getViewer().getTree().setTopItem(view.getViewer().getTree().getItem(0));
+		screenshot((Control) rightStack.getWidget(), "readme");
 
 		// a narrower window makes the column narrower: below the breakpoint the option buttons move under their field
 		page.getWorkbenchWindow().getShell().setSize(880, 820);
@@ -298,7 +304,7 @@ class SearchViewUiTest {
 	void clickPreviewsOrOpens() throws Exception {
 		view.activateSearch("sendSms");
 		waitForSearch();
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		// the bare platform has no Java editor and would hand the file to the operating system
 		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
 		LineMatch match = view.getResult().get(configuration).getMatches().get(0);
@@ -348,13 +354,13 @@ class SearchViewUiTest {
 
 		// Java, colored by JDT right away
 		List<LineMatch> javaMatches = view.getResult()
-				.get(project.getFile("src/com/example/ExternalMessengerConfiguration.java")).getMatches();
+				.get(project.getFile("src/com/example/MessagingConfiguration.java")).getMatches();
 		click(javaMatches.get(0));
 		waitUntil(() -> CONFIGURATION.equals(preview.getText()), 5_000);
 		assertNotNull(preview.getStyleRangeAtOffset(0).foreground, "the keyword 'package' is colored");
 		assertMarked(preview, javaMatches.get(0), true);
 		// the semantic highlighting follows from the parsed file (behind the 'sms' match), the marks below must survive it
-		int field = CONFIGURATION.indexOf("return smsTwilioAccountSid") + "return sms".length();
+		int field = CONFIGURATION.indexOf("return smsGatewayApiKey") + "return sms".length();
 		StyleRange lexical = preview.getStyleRangeAtOffset(field);
 		waitUntil(() -> {
 			StyleRange range = preview.getStyleRangeAtOffset(field);
@@ -437,7 +443,7 @@ class SearchViewUiTest {
 
 	@Test
 	void temporaryTabIsReusedUntilKept() throws Exception {
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		IFile sender = project.getFile("src/com/example/SmsSender.java");
 		IFile readme = project.getFile("docs/README.md");
 		for (IFile file : List.of(configuration, sender, readme)) {
@@ -491,7 +497,7 @@ class SearchViewUiTest {
 
 	@Test
 	void enterOpensTheFirstResultAlsoWhenItIsNotSelected() {
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
 		view.setSelectFirstResult(false);
 		view.activateSearch("sendSms");
@@ -505,7 +511,7 @@ class SearchViewUiTest {
 
 	@Test
 	void picksAndOpensResultsFromTheSearchField() {
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		IFile readme = project.getFile("docs/README.md");
 		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
 		IDE.setDefaultEditor(readme, "org.eclipse.ui.DefaultTextEditor");
@@ -615,7 +621,7 @@ class SearchViewUiTest {
 
 	@Test
 	void marksTheMatchesInOpenEditors() throws Exception {
-		IFile configuration = project.getFile("src/com/example/ExternalMessengerConfiguration.java");
+		IFile configuration = project.getFile("src/com/example/MessagingConfiguration.java");
 		IDE.setDefaultEditor(configuration, "org.eclipse.ui.DefaultTextEditor");
 		ITextEditor editor = (ITextEditor) IDE.openEditor(page, configuration);
 		view.activateSearch("sendSms");
@@ -690,7 +696,7 @@ class SearchViewUiTest {
 		assertTrue(view.getViewer().getTree().getItemCount() >= 3, "the previous results stay, no blinking empty tree");
 		waitForSearch();
 		assertTrue(view.isNarrowed());
-		assertEquals(Set.of("ExternalMessengerConfiguration.java", "SmsSender.java", "Late.java", "Plain.java",
+		assertEquals(Set.of("MessagingConfiguration.java", "SmsSender.java", "Late.java", "Plain.java",
 				"Hidden.java"), resultFileNames());
 		String narrowed = view.getSummary();
 
