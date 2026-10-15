@@ -155,9 +155,42 @@ class WorkspaceSearchTest {
 				findNames(files, "https://git.example.com/repo/-/blob/main/web/Foo.java?ref_type=heads#L2"), "a link");
 	}
 
+	@Test
+	void exactNamesFindFilesTheGlobsLeaveOut() throws CoreException {
+		createFile("web/node_modules/Foo.js", "");
+		createFile("web/node_modules/Foo.java", "");
+		createFile("web/node_modules/Makefile", "");
+
+		assertEquals(List.of("search-test/web/node_modules/Foo.js"), exactNames("foo.JS", "*.java"),
+				"with the extension whatever the globs say");
+		assertEquals(List.of("search-test/web/node_modules/Foo.java"), exactNames("Foo", "*.java"),
+				"without it only the included ones, the one in src is in the scope anyway");
+		assertEquals(List.of(), exactNames("Makefile", "*.java"), "without an extension the include still applies");
+		assertEquals(List.of("search-test/web/node_modules/Makefile"), exactNames("Makefile", ""), "the exclude not");
+		assertEquals(List.of(), exactNames("Fo", ""), "only whole names");
+		assertEquals(List.of(), exactNames("Gen.java", ""), "not derived files");
+		assertEquals(List.of("search-nested/Nested.java"), exactNames("Nested.java", "*.txt"),
+				"once, under the nested project");
+	}
+
+	/**
+	 * @return the files the globs leave out found by their exact name, with includes and node_modules excluded, sorted
+	 */
+	private static List<String> exactNames(String text, String includes) {
+		SearchQuery query = new SearchQuery(text, false, false, false, includes, "node_modules", true, false, true);
+		WorkspaceSearchScope scope = WorkspaceSearchScope.of(query);
+		WorkspaceSearchScope.Files files = scope.evaluateFiles(new MultiStatus(WorkspaceSearchTest.class, 0, ""));
+		List<String> found = new ArrayList<>();
+		FileNameSearch.searchExactNames(files.outsideGlobs(), query, scope,
+				name -> found.add(name.getFile().getFullPath().makeRelative().toString()), new NullProgressMonitor());
+		found.sort(null);
+		return found;
+	}
+
 	private IFile[] scopeFiles() {
 		SearchQuery query = new SearchQuery("x", false, false, false, "", "node_modules", true);
-		return new ScopeFiles().get(query, WorkspaceSearchScope.of(query), new MultiStatus(getClass(), 0, ""));
+		return new ScopeFiles().get(query, WorkspaceSearchScope.of(query), new MultiStatus(getClass(), 0, ""))
+				.inScope();
 	}
 
 	/**

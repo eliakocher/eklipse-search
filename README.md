@@ -97,6 +97,10 @@ Updates*: it consults every enabled update site, with the same effect as leaving
 - Files whose name matches are listed on top before the content search is done, so a file name and `Enter` open the
   file like *Open Resource* (*Search File Names* in the view's ⋮ menu, on by default). Camel case abbreviations work
   too: `AdaCarCss` or `ACCV` finds `AdaptiveCardCssVariables.java`
+- The exact name of a file finds it even where *Include* and *Exclude* leave it out: `MessageBatchTest.js` finds that
+  file in an excluded folder with only `*.java` included. Without the extension, `MessageBatchTest` still keeps to
+  *Include* (it finds `MessageBatchTest.java` in an excluded folder, not `MessageBatchTest.js`). Only the name is
+  found, the content of these files isn't searched
 - Paste what you copied to find the file: a path (absolute or relative to anywhere, e.g. from a diff or a GitLab
   link), a class (`com.acme.Foo`, `com.acme.Foo#run`) or a stack trace line (`at com.acme.Foo.run(Foo.java:42)`); of
   the files with that name, those with the most matching folders are listed. With a line (`Foo.java:42`,

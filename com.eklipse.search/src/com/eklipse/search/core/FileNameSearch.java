@@ -59,6 +59,44 @@ public final class FileNameSearch {
 		}
 	}
 
+	/**
+	 * Finds the files the include/exclude globs leave out by their exact name, so a file looked for by its name shows
+	 * up even if it's excluded: the search text with an extension, like {@code Foo.js}, finds the file with that name
+	 * whatever the globs say; without one, like {@code Foo}, it finds the files with that name with or without an
+	 * extension, and the include globs still apply, so {@code *.java} finds {@code Foo.java} but not {@code Foo.js}.
+	 * Regular expressions and texts with wildcards find nothing, they have no exact name.
+	 *
+	 * @param files the files the globs of {@code scope} leave out, see {@link WorkspaceSearchScope.Files}
+	 * @param query the query
+	 * @param scope the scope of {@code query}, for its include globs
+	 * @param names receives the files found
+	 * @param monitor the monitor used for cancellation, stops the search when canceled
+	 */
+	public static void searchExactNames(IFile[] files, SearchQuery query, WorkspaceSearchScope scope,
+			Consumer<FileNameMatch> names, IProgressMonitor monitor) {
+		String text = query.text();
+		if (text.isEmpty() || query.regex() || query.wildcards() && text.indexOf('*') >= 0) {
+			return;
+		}
+		boolean ignoreCase = !query.caseSensitive();
+		int length = text.length();
+		// not a name starting with a dot like .gitignore
+		boolean withExtension = text.lastIndexOf('.') > 0;
+		for (IFile file : files) {
+			if (monitor.isCanceled()) {
+				return;
+			}
+			String name = file.getName();
+			// most names already differ in their length
+			boolean whole = name.length() == length;
+			boolean withoutExtension = name.length() > length && name.lastIndexOf('.') == length;
+			if ((whole || withoutExtension) && name.regionMatches(ignoreCase, 0, text, 0, length)
+					&& (whole && withExtension || scope.isIncluded(file))) {
+				names.accept(new FileNameMatch(file, 0, length));
+			}
+		}
+	}
+
 	private static FileNameMatch find(IFile file, String name, Matcher matcher) {
 		matcher.reset(name);
 		// a regex like a* also matches nothing, that's no reason to list every file

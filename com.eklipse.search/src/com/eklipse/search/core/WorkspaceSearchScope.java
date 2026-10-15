@@ -1,6 +1,8 @@
 package com.eklipse.search.core;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.eclipse.core.resources.IContainer;
@@ -8,8 +10,11 @@ import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IResourceProxy;
+import org.eclipse.core.resources.IResourceProxyVisitor;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.MultiStatus;
 import org.eclipse.search.core.text.TextSearchScope;
 
 /**
@@ -97,13 +102,46 @@ public final class WorkspaceSearchScope extends TextSearchScope {
 	}
 
 	/**
-	 * Checks only the include/exclude globs, so it works for a file that doesn't exist anymore too.
+	 * The files of a scope, and those only its include/exclude globs leave out, which a search for a file's exact name
+	 * finds too.
 	 *
-	 * @param file the file to check
-	 * @return {@code true} if the globs accept the file
+	 * @param inScope the files of the scope
+	 * @param outsideGlobs the files the globs leave out, e.g. those in an excluded folder; not those the scope skips for
+	 *            another reason, like derived files or duplicates in nested projects
 	 */
-	public boolean matchesGlobs(IFile file) {
-		return acceptsFile(relativePath(file.getFullPath()));
+	public record Files(IFile[] inScope, IFile[] outsideGlobs) {
+	}
+
+	/**
+	 * Walks the workspace once for both kinds of files, see {@link Files}.
+	 *
+	 * @param status receives problems with the resources visited
+	 * @return the files
+	 */
+	public Files evaluateFiles(MultiStatus status) {
+		Walk walk = new Walk();
+		try {
+			ResourcesPlugin.getWorkspace().getRoot().accept(walk, IResource.NONE);
+		} catch (CoreException e) {
+			status.add(e.getStatus());
+		}
+		return new Files(walk.inScope.toArray(IFile[]::new), walk.outsideGlobs.toArray(IFile[]::new));
+	}
+
+	/**
+	 * @param file the file to check
+	 * @return {@code true} if the include globs accept the file, whatever the exclude globs say
+	 */
+	public boolean isIncluded(IFile file) {
+		return includes.isEmpty() || includes.matches(relativePath(file.getFullPath()));
+	}
+
+	/**
+	 * @param name the name of a folder
+	 * @return {@code true} if the scope never looks into a folder with that name, whatever the globs say
+	 */
+	static boolean isIgnoredFolder(String name) {
+		return IGNORED_FOLDERS.contains(name);
 	}
 
 	private boolean acceptsFile(String path) {
@@ -117,5 +155,45 @@ public final class WorkspaceSearchScope extends TextSearchScope {
 
 	private static String relativePath(IPath fullPath) {
 		return fullPath.makeRelative().toString();
+	}
+
+	/**
+	 * Sorts the files into those of the scope and those only the globs leave out, skipping the rest like
+	 * {@link #contains(IResourceProxy)} does.
+	 */
+	private final class Walk implements IResourceProxyVisitor {
+
+		final List<IFile> inScope = new ArrayList<>();
+		final List<IFile> outsideGlobs = new ArrayList<>();
+		/** The excluded folder the walk is in, no glob needs to be matched below it; {@code null} for none. */
+		private IPath excludedFolder;
+
+		@Override
+		public boolean visit(IResourceProxy proxy) {
+			if (proxy.isHidden() || proxy.isTeamPrivateMember() || excludeDerived && proxy.isDerived()) {
+				return false;
+			}
+			int type = proxy.getType();
+			if (type != IResource.FILE && type != IResource.FOLDER) {
+				return true;
+			}
+			IPath path = proxy.requestFullPath();
+			// the walk goes depth first, the first resource not below the excluded folder is past it
+			if (excludedFolder != null && !excludedFolder.isPrefixOf(path)) {
+				excludedFolder = null;
+			}
+			if (type == IResource.FOLDER) {
+				if (IGNORED_FOLDERS.contains(proxy.getName()) || isNestedProjectFolder(proxy.requestResource())) {
+					return false;
+				}
+				if (excludedFolder == null && excludes.matches(relativePath(path))) {
+					excludedFolder = path;
+				}
+				return true;
+			}
+			boolean accepted = excludedFolder == null && acceptsFile(relativePath(path));
+			(accepted ? inScope : outsideGlobs).add((IFile) proxy.requestResource());
+			return false;
+		}
 	}
 }

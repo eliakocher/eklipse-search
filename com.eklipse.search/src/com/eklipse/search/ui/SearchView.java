@@ -1259,10 +1259,13 @@ public class SearchView extends ViewPart {
 					super.internalWorked(work);
 				}
 			};
-			IFile[] searched = files != null ? files : scopeFiles(query, s.scope);
+			// also when narrowing: the files the globs leave out are found by their exact name
+			WorkspaceSearchScope.Files all = files == null || names != null ? scopeFiles(query, s.scope) : null;
+			IFile[] searched = files != null ? files : all.inScope();
 			// all names before the content, so the file looked for is there at once and selected as the first result
 			if (names != null) {
 				FileNameSearch.search(searched, query, s.pattern, names, monitor);
+				FileNameSearch.searchExactNames(all.outsideGlobs(), query, s.scope, names, monitor);
 				if (!s.incomingNames.isEmpty() && !display.isDisposed()) {
 					display.asyncExec(() -> showNameMatches(s));
 				}
@@ -1308,11 +1311,12 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * @return the files of the scope, walking the workspace only if they aren't known from an earlier search
+	 * @return the files of the scope and those its globs leave out, walking the workspace only if they aren't known
+	 *         from an earlier search
 	 */
-	private IFile[] scopeFiles(SearchQuery query, WorkspaceSearchScope scope) {
+	private WorkspaceSearchScope.Files scopeFiles(SearchQuery query, WorkspaceSearchScope scope) {
 		MultiStatus status = new MultiStatus(SearchView.class, 0, "Problems collecting the files to search");
-		IFile[] files = scopeFiles.get(query, scope, status);
+		WorkspaceSearchScope.Files files = scopeFiles.get(query, scope, status);
 		if (!status.isOK()) {
 			LOG.log(status);
 		}
