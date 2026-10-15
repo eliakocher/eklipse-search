@@ -47,7 +47,7 @@ Updates*: it consults every enabled update site, with the same effect as leaving
 ### Other ways to install
 
 - **From a zip**, e.g. a build of your own (needs a JDK 21, Maven is downloaded automatically):
-  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.12-SNAPSHOT.zip` into
+  `./mvnw verify -DskipTests` (Windows: `mvnw.cmd`) puts `com.eklipse.search.site-1.0.13-SNAPSHOT.zip` into
   `com.eklipse.search.site/target/`. In *Install New Software*, *Add... > Archive...*, select the zip, then continue
   with step 3 above. Your own build isn't signed, so in step 5 Eclipse asks whether you trust unsigned content
   instead. A newer zip installed the same way shows up as an update.
@@ -70,10 +70,10 @@ Updates*: it consults every enabled update site, with the same effect as leaving
       -installIU com.eklipse.search.feature.feature.group -vmargs -Declipse.p2.unsignedPolicy=allow
   ```
 
-  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.12-SNAPSHOT.zip!/"` instead (Windows:
+  For a zip, pass `-repository "jar:file:/path/to/com.eklipse.search.site-1.0.13-SNAPSHOT.zip!/"` instead (Windows:
   `jar:file:/C:/path/to/...zip!/`).
 
-- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.12-SNAPSHOT.jar` into the `dropins`
+- **Drop-in**: copy `com.eklipse.search/target/com.eklipse.search-1.0.13-SNAPSHOT.jar` into the `dropins`
   folder of the Eclipse installation (next to `plugins`; `Eclipse.app/Contents/Eclipse/dropins` on macOS) and restart.
   Some managed installations ignore `dropins`; use the update site there.
 

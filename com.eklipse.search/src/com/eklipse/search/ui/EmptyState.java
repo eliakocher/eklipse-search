@@ -27,8 +27,9 @@ import org.eclipse.swt.widgets.Event;
 import com.eklipse.search.core.SearchQuery;
 
 /**
- * Shown instead of the results and the preview while both would be empty: a magnifier, a search to try and a tip
- * while nothing is searched, or what limited a search that found nothing.
+ * Shown instead of the results and the preview while both would be empty: a magnifier, a search to try, a tip and a
+ * button to the settings while nothing is searched, or what limited a search that found nothing and a button to
+ * refresh the workspace.
  * <p>
  * Painted in the colors and font of the results tree, so it looks the same in light and dark theme.
  */
@@ -40,6 +41,23 @@ final class EmptyState {
 	private static final int GAP = 14;
 	/** Share of the text color in the icon, the rest is background, so the icon stays in the background. */
 	private static final double ICON_TEXT_SHARE = 0.35;
+	private static final String REFRESH_QUESTION = "Pulled outside Eclipse?";
+	private static final String REFRESH = "Refresh workspace";
+	private static final String REFRESHING = "Refreshing workspace" + ELLIPSIS;
+	private static final String SETTINGS = "Settings";
+	private static final int BUTTON_PADDING_X = 12;
+	private static final int BUTTON_PADDING_Y = 4;
+	private static final int BUTTON_ARC = 8;
+	/** Shares of the text color in the button's outline and fill, the fill stronger under the mouse and pressed. */
+	private static final double BUTTON_OUTLINE_SHARE = 0.3;
+	private static final double BUTTON_FILL_SHARE = 0.06;
+	private static final double BUTTON_HOVER_SHARE = 0.12;
+	private static final double BUTTON_PRESSED_SHARE = 0.2;
+
+	/** The clickable parts: the suggested search and the button at the bottom. */
+	private enum Target {
+		NONE, SUGGESTION, BUTTON
+	}
 
 	private final Canvas canvas;
 	private final Control colors;
@@ -54,33 +72,54 @@ final class EmptyState {
 	/** The tip, or what limited the search, {@code null} for none. */
 	private String footer;
 	private Rectangle suggestionBounds = new Rectangle(0, 0, 0, 0);
-	private boolean hover;
+	/** Empty while the button is disabled. */
+	private Rectangle buttonBounds = new Rectangle(0, 0, 0, 0);
+	private boolean refreshing;
+	private Target hover = Target.NONE;
+	/** Whether the mouse button went down on the button and is still down. */
+	private boolean pressed;
 
 	/**
 	 * @param parent the composite to create the control in
 	 * @param colors the control whose colors and font to paint with
 	 * @param resources the resources to create the heading font with
 	 * @param search searches for the suggestion when it's clicked
+	 * @param refresh refreshes the workspace when the button offering it is clicked, for files changed outside Eclipse
+	 * @param settings opens the settings when the button offering them is clicked, at the given point below the
+	 *            button in display coordinates
 	 */
-	EmptyState(Composite parent, Control colors, LocalResourceManager resources, Consumer<String> search) {
+	EmptyState(Composite parent, Control colors, LocalResourceManager resources, Consumer<String> search,
+			Runnable refresh, Consumer<Point> settings) {
 		this.colors = colors;
 		this.resources = resources;
 		// a click shouldn't take the focus from the search field
 		canvas = new Canvas(parent, SWT.DOUBLE_BUFFERED | SWT.NO_FOCUS);
 		canvas.addListener(SWT.Paint, this::paint);
 		canvas.addListener(SWT.Resize, e -> canvas.redraw());
-		canvas.addListener(SWT.MouseMove, e -> setHover(suggestionBounds.contains(e.x, e.y)));
-		canvas.addListener(SWT.MouseExit, e -> setHover(false));
+		canvas.addListener(SWT.MouseMove, e -> setHover(targetAt(e.x, e.y)));
+		canvas.addListener(SWT.MouseExit, e -> setHover(Target.NONE));
+		canvas.addListener(SWT.MouseDown, e -> setPressed(e.button == 1 && targetAt(e.x, e.y) == Target.BUTTON));
 		canvas.addListener(SWT.MouseUp, e -> {
-			if (e.button == 1 && suggestionBounds.contains(e.x, e.y)) {
+			Target target = e.button == 1 ? targetAt(e.x, e.y) : Target.NONE;
+			// like a native button, a click only counts if the button was pressed on the button too
+			boolean wasPressed = pressed;
+			setPressed(false);
+			if (target == Target.SUGGESTION) {
 				search.accept(suggestion);
+			} else if (target == Target.BUTTON && wasPressed) {
+				if (noResults) {
+					refresh.run();
+				} else {
+					settings.accept(canvas.toDisplay(buttonBounds.x, buttonBounds.y + buttonBounds.height));
+				}
 			}
 		});
 		canvas.getAccessible().addAccessibleListener(new AccessibleAdapter() {
 			@Override
 			public void getName(AccessibleEvent e) {
 				e.result = heading + ". " + suggestionPrefix + suggestion + suggestionSuffix
-						+ (footer != null ? ". " + footer : "");
+						+ (footer != null ? ". " + footer : "") + ". "
+						+ (noResults ? REFRESH_QUESTION + " " + (refreshing ? REFRESHING : REFRESH) : SETTINGS);
 			}
 		});
 		showNothingSearched();
@@ -172,10 +211,31 @@ final class EmptyState {
 		return lines.isEmpty() ? null : String.join("\n", lines);
 	}
 
-	private void setHover(boolean hover) {
+	/**
+	 * @param refreshing whether the workspace is being refreshed, the refresh button is disabled meanwhile
+	 */
+	void setRefreshing(boolean refreshing) {
+		this.refreshing = refreshing;
+		canvas.redraw();
+	}
+
+	private Target targetAt(int x, int y) {
+		return suggestionBounds.contains(x, y) ? Target.SUGGESTION
+				: buttonBounds.contains(x, y) ? Target.BUTTON : Target.NONE;
+	}
+
+	private void setHover(Target hover) {
 		if (this.hover != hover) {
 			this.hover = hover;
-			canvas.setCursor(hover ? canvas.getDisplay().getSystemCursor(SWT.CURSOR_HAND) : null);
+			// a button keeps the arrow, like a native one
+			canvas.setCursor(hover == Target.SUGGESTION ? canvas.getDisplay().getSystemCursor(SWT.CURSOR_HAND) : null);
+			canvas.redraw();
+		}
+	}
+
+	private void setPressed(boolean pressed) {
+		if (this.pressed != pressed) {
+			this.pressed = pressed;
 			canvas.redraw();
 		}
 	}
@@ -197,9 +257,12 @@ final class EmptyState {
 		int headingLine = gc.getFontMetrics().getHeight();
 		gc.setFont(font);
 		List<String> footerLines = footer != null ? wrap(gc, footer, width) : List.of();
+		List<String> refreshLines = noResults ? wrap(gc, REFRESH_QUESTION, width) : List.of();
 		int line = gc.getFontMetrics().getHeight();
+		int buttonHeight = line + 2 * BUTTON_PADDING_Y;
 		int height = ICON_SIZE + GAP + headingLines.size() * headingLine + GAP / 2 + line
-				+ (footerLines.isEmpty() ? 0 : GAP + footerLines.size() * line);
+				+ (footerLines.isEmpty() ? 0 : GAP + footerLines.size() * line) + GAP
+				+ (refreshLines.isEmpty() ? 0 : refreshLines.size() * line + GAP / 2) + buttonHeight;
 		// a bit above the middle looks centered
 		int y = area.y + Math.max(MARGIN, (area.height - height) * 2 / 5);
 
@@ -214,27 +277,62 @@ final class EmptyState {
 
 		gc.setFont(font);
 		Color qualifier = JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR);
+		Color secondary = qualifier != null ? qualifier : foreground;
 		Color link = JFaceResources.getColorRegistry().get(JFacePreferences.HYPERLINK_COLOR);
 		int prefixWidth = gc.textExtent(suggestionPrefix).x;
 		Point suggestionSize = gc.textExtent(suggestion);
 		int lineWidth = prefixWidth + suggestionSize.x + gc.textExtent(suggestionSuffix).x;
 		int x = area.x + Math.max(MARGIN, (area.width - lineWidth) / 2);
 		int suggestionX = x + prefixWidth;
-		gc.setForeground(qualifier != null ? qualifier : foreground);
+		gc.setForeground(secondary);
 		gc.drawText(suggestionPrefix, x, y, true);
 		gc.drawText(suggestionSuffix, suggestionX + suggestionSize.x, y, true);
 		gc.setForeground(link != null ? link : canvas.getDisplay().getSystemColor(SWT.COLOR_LINK_FOREGROUND));
 		gc.drawText(suggestion, suggestionX, y, true);
 		suggestionBounds = new Rectangle(suggestionX, y, suggestionSize.x, suggestionSize.y);
-		if (hover) {
+		if (hover == Target.SUGGESTION) {
 			int underline = y + gc.getFontMetrics().getAscent() + 1;
 			gc.setLineWidth(1);
 			gc.drawLine(suggestionX, underline, suggestionX + suggestionSize.x, underline);
 		}
 		y += line + GAP;
 
-		gc.setForeground(qualifier != null ? qualifier : foreground);
-		drawCentered(gc, footerLines, area, y, line);
+		gc.setForeground(secondary);
+		y = drawCentered(gc, footerLines, area, y, line);
+		if (!footerLines.isEmpty()) {
+			y += GAP;
+		}
+		if (!refreshLines.isEmpty()) {
+			y = drawCentered(gc, refreshLines, area, y, line) + GAP / 2;
+		}
+
+		// as wide while refreshing, so the button doesn't jump
+		int textWidth = noResults ? Math.max(gc.textExtent(REFRESH).x, gc.textExtent(REFRESHING).x)
+				: gc.textExtent(SETTINGS).x;
+		int buttonWidth = textWidth + 2 * BUTTON_PADDING_X;
+		Rectangle button = new Rectangle(area.x + Math.max(MARGIN, (area.width - buttonWidth) / 2), y, buttonWidth,
+				buttonHeight);
+		boolean enabled = !noResults || !refreshing;
+		drawButton(gc, button, !noResults ? SETTINGS : refreshing ? REFRESHING : REFRESH, enabled);
+		buttonBounds = enabled ? button : new Rectangle(0, 0, 0, 0);
+	}
+
+	/**
+	 * Draws a secondary button: an outline around a faint fill, which gets stronger under the mouse and when pressed.
+	 */
+	private void drawButton(GC gc, Rectangle bounds, String text, boolean enabled) {
+		Color background = colors.getBackground();
+		Color foreground = colors.getForeground();
+		boolean hovered = enabled && hover == Target.BUTTON;
+		double fill = !hovered ? BUTTON_FILL_SHARE : pressed ? BUTTON_PRESSED_SHARE : BUTTON_HOVER_SHARE;
+		gc.setBackground(mix(background, foreground, fill));
+		gc.fillRoundRectangle(bounds.x, bounds.y, bounds.width, bounds.height, BUTTON_ARC, BUTTON_ARC);
+		gc.setForeground(mix(background, foreground, BUTTON_OUTLINE_SHARE));
+		gc.setLineWidth(1);
+		gc.drawRoundRectangle(bounds.x, bounds.y, bounds.width - 1, bounds.height - 1, BUTTON_ARC, BUTTON_ARC);
+		Color qualifier = JFaceResources.getColorRegistry().get(JFacePreferences.QUALIFIER_COLOR);
+		gc.setForeground(enabled || qualifier == null ? foreground : qualifier);
+		gc.drawText(text, bounds.x + (bounds.width - gc.textExtent(text).x) / 2, bounds.y + BUTTON_PADDING_Y, true);
 	}
 
 	/**

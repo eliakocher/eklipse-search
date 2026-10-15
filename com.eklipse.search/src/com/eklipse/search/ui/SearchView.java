@@ -28,7 +28,9 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IResourceChangeEvent;
 import org.eclipse.core.resources.IResourceChangeListener;
 import org.eclipse.core.resources.IResourceDelta;
+import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.resources.WorkspaceJob;
 import org.eclipse.core.runtime.Adapters;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.ILog;
@@ -88,6 +90,7 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Listener;
+import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.ProgressBar;
 import org.eclipse.swt.widgets.Sash;
 import org.eclipse.swt.widgets.Text;
@@ -252,6 +255,9 @@ public class SearchView extends ViewPart {
 	private final Set<IFile> pendingRefresh = new HashSet<>();
 	private final ScopeFiles scopeFiles = new ScopeFiles();
 	private Job scopeFilesJob;
+	private Job refreshJob;
+	/** The view menu's options below the settings button of the empty state, created when first shown. */
+	private MenuManager settingsMenu;
 	private IResourceChangeListener resourceListener;
 	private final IFileBufferListener bufferListener = new BufferListener();
 	private boolean searchScheduled;
@@ -572,7 +578,8 @@ public class SearchView extends ViewPart {
 		preview = new PreviewPane(resultSash);
 		resultSash.setWeights(DEFAULT_PREVIEW_WEIGHTS);
 		drawSashLines();
-		emptyState = new EmptyState(parent, tree, resources, this::activateSearch);
+		emptyState = new EmptyState(parent, tree, resources, this::activateSearch, this::refreshWorkspace,
+				this::showSettingsMenu);
 		GridDataFactory.fillDefaults().grab(true, true).exclude(true).applyTo(emptyState.getControl());
 		emptyState.getControl().setVisible(false);
 		setEmptyStateVisible(true);
@@ -652,12 +659,13 @@ public class SearchView extends ViewPart {
 		expandAllAction = createAction("Expand All", searchImage("expandall.png"), () -> viewer.expandAll());
 		collapseAllAction = createAction("Collapse All",
 				images.getImageDescriptor(ISharedImages.IMG_ELCL_COLLAPSEALL), () -> viewer.collapseAll());
-		regexAction = createOptionAction("Use Regular Expression", 'R', overlayIcon("regex"));
+		// the view menu has no icons, a few would look scattered
+		regexAction = createOptionAction("Use Regular Expression", 'R');
 		// the build output Eclipse marks as derived, e.g. Maven target/ folders
-		derivedAction = createOptionAction("Skip Derived Resources", 'D', icons.funnel());
+		derivedAction = createOptionAction("Skip Derived Resources", 'D');
 		// final*size instead of the regular expression final.*?size
-		wildcardAction = createOptionAction("Use Wildcards", 'A', null);
-		fileNamesAction = createOptionAction("Search File Names", 'F', null);
+		wildcardAction = createOptionAction("Use Wildcards", 'A');
+		fileNamesAction = createOptionAction("Search File Names", 'F');
 		shortcuts = List.of(
 				new Shortcut(refreshAction, "Refresh", IWorkbenchCommandConstants.FILE_REFRESH, "F5"),
 				new Shortcut(clearAction, "Clear Search Results", "com.eklipse.search.clear", "M1+M2+BS"),
@@ -683,10 +691,6 @@ public class SearchView extends ViewPart {
 		};
 		previewAction.setToolTipText(
 				"Show Preview: a click on a result shows its file below the results, a double-click opens it. When off, a click opens the editor.");
-		ImageDescriptor previewImage = searchImage("verticalOrientation.png");
-		if (previewImage != null) {
-			previewAction.setImageDescriptor(previewImage);
-		}
 		temporaryTabAction = new Action("Open in Temporary Tab", IAction.AS_CHECK_BOX) {
 			@Override
 			public void run() {
@@ -748,17 +752,13 @@ public class SearchView extends ViewPart {
 	/**
 	 * @return a search option for the view menu, toggled with Alt and {@code key} in the text fields too
 	 */
-	private Action createOptionAction(String text, char key, ImageDescriptor image) {
-		Action action = new Action(text + " (" + (Util.isMac() ? "⌥" : "Alt+") + key + ")", IAction.AS_CHECK_BOX) {
+	private Action createOptionAction(String text, char key) {
+		return new Action(text + " (" + (Util.isMac() ? "⌥" : "Alt+") + key + ")", IAction.AS_CHECK_BOX) {
 			@Override
 			public void run() {
 				scheduleSearch(0);
 			}
 		};
-		if (image != null) {
-			action.setImageDescriptor(image);
-		}
-		return action;
 	}
 
 	private static Action createAction(String text, ImageDescriptor image, Runnable runnable) {
@@ -783,15 +783,7 @@ public class SearchView extends ViewPart {
 		toolBar.add(new Separator());
 		toolBar.add(expandAllAction);
 		toolBar.add(collapseAllAction);
-		IMenuManager menu = bars.getMenuManager();
-		menu.add(regexAction);
-		menu.add(wildcardAction);
-		menu.add(fileNamesAction);
-		menu.add(derivedAction);
-		menu.add(new Separator());
-		menu.add(previewAction);
-		menu.add(temporaryTabAction);
-		menu.add(selectFirstAction);
+		fillViewMenu(bars.getMenuManager());
 
 		// Copy, Delete and Select All work on the fields while they have focus, on the results otherwise
 		FieldActionHandler fieldActionHandler = new FieldActionHandler(bars, copyAction, dismissAction,
@@ -855,6 +847,39 @@ public class SearchView extends ViewPart {
 		} catch (ParseException e) {
 			return null;
 		}
+	}
+
+	/**
+	 * Adds the options, to the view menu and to the menu of the settings button.
+	 *
+	 * @param menu the menu to add them to
+	 */
+	private void fillViewMenu(IMenuManager menu) {
+		menu.add(regexAction);
+		menu.add(wildcardAction);
+		menu.add(fileNamesAction);
+		menu.add(derivedAction);
+		menu.add(new Separator());
+		menu.add(previewAction);
+		menu.add(temporaryTabAction);
+		menu.add(selectFirstAction);
+	}
+
+	/**
+	 * Opens the view menu's options for the settings button of the empty state.
+	 *
+	 * @param location the top left corner of the menu, in display coordinates
+	 */
+	private void showSettingsMenu(Point location) {
+		if (settingsMenu == null) {
+			settingsMenu = new MenuManager();
+			settingsMenu.setRemoveAllWhenShown(true);
+			settingsMenu.addMenuListener(this::fillViewMenu);
+			settingsMenu.createContextMenu(emptyState.getControl());
+		}
+		Menu menu = settingsMenu.getMenu();
+		menu.setLocation(location);
+		menu.setVisible(true);
 	}
 
 	private void hookContextMenu() {
@@ -1309,6 +1334,48 @@ public class SearchView extends ViewPart {
 		});
 		scopeFilesJob.setSystem(true);
 		scopeFilesJob.schedule();
+	}
+
+	/**
+	 * Refreshes all projects from the file system, for files changed outside Eclipse that the search can't see yet,
+	 * e.g. by a git pull in a terminal, then searches again.
+	 */
+	private void refreshWorkspace() {
+		if (refreshJob != null) {
+			return;
+		}
+		IWorkspaceRoot root = ResourcesPlugin.getWorkspace().getRoot();
+		refreshJob = new WorkspaceJob("Refreshing workspace") {
+			@Override
+			public IStatus runInWorkspace(IProgressMonitor monitor) throws CoreException {
+				root.refreshLocal(IResource.DEPTH_INFINITE, monitor);
+				return Status.OK_STATUS;
+			}
+		};
+		refreshJob.setRule(ResourcesPlugin.getWorkspace().getRuleFactory().refreshRule(root));
+		refreshJob.addJobChangeListener(new JobChangeAdapter() {
+			@Override
+			public void done(IJobChangeEvent event) {
+				if (display.isDisposed()) {
+					return;
+				}
+				display.asyncExec(() -> {
+					refreshJob = null;
+					if (isDisposed()) {
+						return;
+					}
+					emptyState.setRefreshing(false);
+					SearchSession s = session;
+					if (s != null) {
+						// a full search: the files of the previous one may not be all the refresh brought in
+						s.scopeChanged = true;
+						startSearch();
+					}
+				});
+			}
+		});
+		emptyState.setRefreshing(true);
+		refreshJob.schedule();
 	}
 
 	private static IFile fileOf(IFileBuffer buffer) {
@@ -2539,6 +2606,9 @@ public class SearchView extends ViewPart {
 		if (undoHandler != null) {
 			undoHandler.dispose();
 			redoHandler.dispose();
+		}
+		if (settingsMenu != null) {
+			settingsMenu.dispose();
 		}
 		super.dispose();
 	}

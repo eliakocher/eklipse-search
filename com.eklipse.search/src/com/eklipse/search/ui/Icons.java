@@ -33,7 +33,6 @@ final class Icons {
 	private final RGB accent;
 	private final ImageDescriptor chevronRight;
 	private final ImageDescriptor chevronDown;
-	private final ImageDescriptor funnel;
 	private final ImageDescriptor preserveCase;
 
 	/**
@@ -47,7 +46,6 @@ final class Icons {
 		// as large as the toggles, so the replace toggle lines up with the search field like they do
 		chevronRight = toggle(draw(0.8, new double[] { 6, 4, 10, 8, 6, 12 }), false);
 		chevronDown = toggle(draw(0.8, new double[] { 4, 6, 8, 10, 12, 6 }), false);
-		funnel = draw(0.65, new double[] { 2, 3.5, 14, 3.5, 10, 8.5, 10, 13.5, 6, 12, 6, 8.5, 2, 3.5 });
 		// "AB"
 		preserveCase = draw(0.6, new double[] { 2, 12, 5, 4, 8, 12 }, new double[] { 3.1, 9.2, 6.9, 9.2 },
 				new double[] { 10, 12, 10, 4, 12.3, 4, 13.2, 4.5, 13.6, 5.3, 13.6, 6.4, 13.2, 7.2, 12.3, 7.7, 10, 7.7 },
@@ -60,13 +58,6 @@ final class Icons {
 	 */
 	ImageDescriptor chevron(boolean expanded) {
 		return expanded ? chevronDown : chevronRight;
-	}
-
-	/**
-	 * @return a funnel, for the derived resources filter
-	 */
-	ImageDescriptor funnel() {
-		return funnel;
 	}
 
 	/**
