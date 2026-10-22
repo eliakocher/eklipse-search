@@ -7,7 +7,7 @@ IEclipsePreferences#org-eclipse-ui-workbench:com-eklipse-search { /* pseudo attr
 
 /* The fields on the background of dialogs, like in Open Resource: the search fields stand out of it. The buttons are
    styled one by one. The labels in the color of dialogs too, the views' gray is too dim on it. The combo boxes are
-   left to the theme. */
+   left to the theme, on macOS to the system, see css/dark_mac.css. */
 #com-eklipse-search-header,
 #com-eklipse-search-header Composite,
 #com-eklipse-search-header ToolBar,

@@ -1,0 +1,9 @@
+/* Dark theme values on macOS only, next to css/dark.css (plugin.xml). */
+
+/* The combo boxes native: the color the dark theme gives Combo fills only the text of one on macOS, not the box around
+   it, a dark slab in a lighter frame. Without it the system draws the whole box dark. Windows needs the color, its
+   native combo box stays light. */
+#com-eklipse-search-header Combo {
+	background-color: unset;
+	color: unset;
+}
