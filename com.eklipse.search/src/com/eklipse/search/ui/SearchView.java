@@ -154,6 +154,11 @@ public class SearchView extends ViewPart {
 	private static final int FILE_REFRESH_DELAY_MS = 300;
 	/** Short enough to feel instant on a click, long enough to skip the results passed when holding an arrow key. */
 	private static final int PREVIEW_DELAY_MS = 50;
+	/**
+	 * The temporary tab waits longer for the first result of a search, which is selected while typing: a pause between
+	 * two keys shouldn't open an editor for a result typing on replaces.
+	 */
+	private static final int FIRST_RESULT_TAB_DELAY_MS = 500;
 	private static final int AUTO_EXPAND_LIMIT = 2_000;
 	/** Enough for the file looked for, few enough not to bury the matches in the content under file names. */
 	private static final int MAX_NAME_MATCHES = 10;
@@ -267,6 +272,8 @@ public class SearchView extends ViewPart {
 	private boolean settingSearchText;
 	/** The first result, selected by {@link #selectFirstResult()} until another one is. */
 	private Object autoSelected;
+	/** Set while {@link #selectFirstResult()} selects it, the temporary tab then waits longer. */
+	private boolean selectingFirstResult;
 	private LocalResourceManager resources;
 	private Icons icons;
 	private boolean narrowLayout;
@@ -1119,7 +1126,8 @@ public class SearchView extends ViewPart {
 	private void schedulePreview() {
 		if (isPreviewVisible() || temporaryTabAction.isChecked()) {
 			display.timerExec(-1, previewTrigger);
-			display.timerExec(PREVIEW_DELAY_MS, previewTrigger);
+			display.timerExec(selectingFirstResult && temporaryTabAction.isChecked() ? FIRST_RESULT_TAB_DELAY_MS
+					: PREVIEW_DELAY_MS, previewTrigger);
 		}
 	}
 
@@ -1166,6 +1174,12 @@ public class SearchView extends ViewPart {
 	private void showInTemporaryTab() {
 		Object first = viewer.getStructuredSelection().getFirstElement();
 		LineMatch target = targetMatch(first);
+		// a new text editor loads its file through the window (AbstractTextEditor.internalInit), which disables the
+		// window meanwhile: the focus leaves the field typed in and comes back with all of its text selected on macOS,
+		// so the next key would replace it
+		Control focus = display.getFocusControl();
+		Point fieldSelection = focus instanceof Text text ? text.getSelection()
+				: focus instanceof Combo combo ? combo.getSelection() : null;
 		try {
 			if (first instanceof FileNameMatch nameMatch) {
 				reveal(temporaryEditor.show(nameMatch.getFile()), nameMatch);
@@ -1175,6 +1189,14 @@ public class SearchView extends ViewPart {
 		} catch (PartInitException e) {
 			// no dialog for a mere selection, a double-click shows the error
 			LOG.warn("Could not show " + (target != null ? target.getFile().getFullPath() : first), e);
+		} finally {
+			if (fieldSelection != null && !focus.isDisposed() && display.getFocusControl() == focus) {
+				if (focus instanceof Text text) {
+					text.setSelection(fieldSelection);
+				} else if (focus instanceof Combo combo) {
+					combo.setSelection(fieldSelection);
+				}
+			}
 		}
 	}
 
@@ -1190,6 +1212,8 @@ public class SearchView extends ViewPart {
 		searchScheduled = true;
 		display.timerExec(-1, searchTrigger);
 		display.timerExec(delayMs, searchTrigger);
+		// the results change, a tab opened for one of them meanwhile would be for nothing
+		display.timerExec(-1, previewTrigger);
 	}
 
 	private void startSearch() {
@@ -1945,7 +1969,12 @@ public class SearchView extends ViewPart {
 		TreeItem first = nextResult(viewer.getTree(), null);
 		autoSelected = first != null ? first.getData() : null;
 		if (autoSelected != null && autoSelected != selection.getFirstElement()) {
-			viewer.setSelection(new StructuredSelection(autoSelected), true);
+			selectingFirstResult = true;
+			try {
+				viewer.setSelection(new StructuredSelection(autoSelected), true);
+			} finally {
+				selectingFirstResult = false;
+			}
 		}
 	}
 
