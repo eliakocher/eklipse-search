@@ -44,7 +44,10 @@ import org.eclipse.core.runtime.jobs.IJobChangeEvent;
 import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.core.runtime.jobs.JobChangeAdapter;
 import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.ActionContributionItem;
+import org.eclipse.jface.action.GroupMarker;
 import org.eclipse.jface.action.IAction;
+import org.eclipse.jface.action.IContributionItem;
 import org.eclipse.jface.action.IMenuManager;
 import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.action.MenuManager;
@@ -104,18 +107,24 @@ import org.eclipse.ui.IMemento;
 import org.eclipse.ui.IPartListener2;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IViewSite;
+import org.eclipse.ui.IWorkbenchActionConstants;
 import org.eclipse.ui.IWorkbenchCommandConstants;
 import org.eclipse.ui.IWorkbenchPartReference;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.actions.ActionFactory;
+import org.eclipse.ui.actions.ContributionItemFactory;
+import org.eclipse.ui.actions.OpenWithMenu;
 import org.eclipse.ui.contexts.IContextService;
+import org.eclipse.ui.dialogs.PropertyDialogAction;
 import org.eclipse.ui.handlers.IHandlerService;
 import org.eclipse.ui.ide.IDE;
 import org.eclipse.ui.ide.undo.WorkspaceUndoUtil;
 import org.eclipse.ui.keys.IBindingService;
 import org.eclipse.ui.operations.RedoActionHandler;
 import org.eclipse.ui.operations.UndoActionHandler;
+import org.eclipse.ui.part.IShowInSource;
+import org.eclipse.ui.part.ShowInContext;
 import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.progress.IWorkbenchSiteProgressService;
 import org.eclipse.ui.texteditor.ITextEditor;
@@ -142,6 +151,10 @@ public class SearchView extends ViewPart {
 	public static final String ID = "com.eklipse.search.view";
 
 	private static final String TITLE = "Search";
+	/** The contributions of other plug-ins to the context menu of a result that stay, by label or id. */
+	private static final Set<String> USEFUL_CONTRIBUTIONS = Set.of("Compare With", "Team");
+	/** Ends the area of the context menu where other plug-ins add their contributions. */
+	private static final String END_OF_CONTRIBUTIONS = "com.eklipse.search.endOfContributions";
 	private static final int SEARCH_DELAY_MS = 250;
 	private static final int UPDATE_INTERVAL_MS = 100;
 	/** How long the previous results stay when a new search finds nothing at first. */
@@ -250,6 +263,7 @@ public class SearchView extends ViewPart {
 	private Action dismissAction;
 	private Action copyAction;
 	private Action copyPathAction;
+	private Action copyQualifiedNameAction;
 	private Action selectAllAction;
 	private UndoActionHandler undoHandler;
 	private RedoActionHandler redoHandler;
@@ -736,6 +750,7 @@ public class SearchView extends ViewPart {
 		});
 		copyAction.setActionDefinitionId(IWorkbenchCommandConstants.EDIT_COPY);
 		copyPathAction = createAction("Copy Path", null, this::copyPaths);
+		copyQualifiedNameAction = createAction("Copy Qualified Name", null, this::copyQualifiedNames);
 		selectAllAction = createAction("Select All", null, () -> {
 			if (preview.hasFocus()) {
 				preview.selectAll();
@@ -894,11 +909,26 @@ public class SearchView extends ViewPart {
 		menuManager.setRemoveAllWhenShown(true);
 		menuManager.addMenuListener(this::fillContextMenu);
 		viewer.getControl().setMenu(menuManager.createContextMenu(viewer.getControl()));
+		// Eclipse adds what it contributes to the files (Open With, Compare With, Team...) to the additions group, like
+		// in the Project Explorer; the listener after it keeps the useful ones
+		getSite().registerContextMenu(menuManager, viewer);
+		menuManager.addMenuListener(this::keepUsefulContributions);
 	}
 
 	private void fillContextMenu(IMenuManager menu) {
 		menu.add(openAction);
-		menu.add(new Separator());
+		// like the Project Explorer, which offers it for a single file
+		Set<IFile> files = selectedFiles();
+		if (files.size() == 1) {
+			MenuManager openWith = new MenuManager("Open With");
+			openWith.add(new OpenWithMenu(getSite().getPage(), files.iterator().next()));
+			menu.add(openWith);
+		}
+		MenuManager showIn = new MenuManager("Show In");
+		showIn.add(ContributionItemFactory.VIEWS_SHOW_IN.create(getSite().getWorkbenchWindow()));
+		menu.add(showIn);
+		menu.add(new GroupMarker(IWorkbenchActionConstants.MB_ADDITIONS));
+		menu.add(new Separator(END_OF_CONTRIBUTIONS));
 		if (isReplaceVisible()) {
 			menu.add(replaceSelectionAction);
 		}
@@ -906,9 +936,77 @@ public class SearchView extends ViewPart {
 		menu.add(new Separator());
 		menu.add(copyAction);
 		menu.add(copyPathAction);
+		if (hasJavaFile(files)) {
+			menu.add(copyQualifiedNameAction);
+		}
 		menu.add(new Separator());
 		menu.add(expandAllAction);
 		menu.add(collapseAllAction);
+		PropertyDialogAction properties = new PropertyDialogAction(getSite(), viewer);
+		if (properties.isApplicableForSelection()) {
+			menu.add(new Separator());
+			menu.add(properties);
+		}
+	}
+
+	/**
+	 * Removes what other plug-ins contributed to the menu that doesn't make sense for a search result, like Run As or
+	 * Debug As.
+	 */
+	private void keepUsefulContributions(IMenuManager menu) {
+		boolean contributed = false;
+		for (IContributionItem item : menu.getItems()) {
+			if (END_OF_CONTRIBUTIONS.equals(item.getId())) {
+				return;
+			}
+			if (IWorkbenchActionConstants.MB_ADDITIONS.equals(item.getId())) {
+				contributed = true;
+			} else if (contributed && !item.isSeparator() && !item.isGroupMarker()
+					&& !USEFUL_CONTRIBUTIONS.contains(contributionName(item))) {
+				menu.remove(item);
+			}
+		}
+	}
+
+	/**
+	 * @return the label of a menu item without mnemonic and shortcut, its id if it has no label
+	 */
+	private static String contributionName(IContributionItem item) {
+		String label = item instanceof MenuManager manager ? manager.getMenuText()
+				: item instanceof ActionContributionItem actionItem ? actionItem.getAction().getText() : null;
+		if (label == null || label.isBlank()) {
+			return item.getId();
+		}
+		int tab = label.indexOf('\t');
+		return (tab >= 0 ? label.substring(0, tab) : label).replace("&", "").strip();
+	}
+
+	/**
+	 * Lets the Show In menu send the selected files to the Project Explorer, Package Explorer and so on.
+	 */
+	@Override
+	@SuppressWarnings("unchecked")
+	public <T> T getAdapter(Class<T> adapter) {
+		if (adapter == IShowInSource.class) {
+			return (T) (IShowInSource) () -> {
+				List<IFile> files = new ArrayList<>(selectedFiles());
+				return new ShowInContext(null, new StructuredSelection(files));
+			};
+		}
+		return super.getAdapter(adapter);
+	}
+
+	private Set<IFile> selectedFiles() {
+		Set<IFile> files = new LinkedHashSet<>();
+		for (Object element : viewer.getStructuredSelection()) {
+			IFile file = element instanceof FileMatch fileMatch ? fileMatch.getFile()
+					: element instanceof FileNameMatch nameMatch ? nameMatch.getFile()
+							: element instanceof LineMatch match ? match.getFile() : null;
+			if (file != null) {
+				files.add(file);
+			}
+		}
+		return files;
 	}
 
 	private void hookListeners() {
@@ -2253,16 +2351,31 @@ public class SearchView extends ViewPart {
 
 	private void copyPaths() {
 		Set<String> paths = new LinkedHashSet<>();
-		for (Object element : viewer.getStructuredSelection()) {
-			IFile file = element instanceof FileMatch fileMatch ? fileMatch.getFile()
-					: element instanceof FileNameMatch nameMatch ? nameMatch.getFile()
-							: element instanceof LineMatch match ? match.getFile() : null;
-			if (file != null) {
-				IPath location = file.getLocation();
-				paths.add(location != null ? location.toOSString() : file.getFullPath().toString());
-			}
+		for (IFile file : selectedFiles()) {
+			IPath location = file.getLocation();
+			paths.add(location != null ? location.toOSString() : file.getFullPath().toString());
 		}
 		copyToClipboard(String.join("\n", paths));
+	}
+
+	/**
+	 * @return {@code true} if JDT is installed and one of the files is Java
+	 */
+	private static boolean hasJavaFile(Set<IFile> files) {
+		try {
+			return JavaNames.hasJavaFile(files);
+		} catch (LinkageError e) {
+			// JDT isn't installed
+			return false;
+		}
+	}
+
+	private void copyQualifiedNames() {
+		try {
+			copyToClipboard(String.join("\n", JavaNames.qualifiedNames(selectedFiles())));
+		} catch (LinkageError e) {
+			// JDT isn't installed, the menu doesn't offer this then
+		}
 	}
 
 	private void copyToClipboard(String text) {

@@ -58,6 +58,8 @@ import org.eclipse.swt.widgets.Combo;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Event;
+import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolItem;
 import org.eclipse.swt.widgets.TreeItem;
@@ -222,6 +224,24 @@ class SearchViewUiTest {
 		ITextSelection selection = (ITextSelection) editor.getSelectionProvider().getSelection();
 		assertEquals(match.getOffset(), selection.getOffset());
 		assertEquals("sms", selection.getText());
+	}
+
+	@Test
+	void contextMenuHasTheUsefulContributionsOfEclipse() throws Exception {
+		view.activateSearch("sendSms");
+		waitForSearch();
+		LineMatch match = view.getResult().get(project.getFile("src/com/example/SmsSender.java")).getMatches().get(0);
+		view.getViewer().setSelection(new StructuredSelection(match), true);
+
+		Menu menu = view.getViewer().getControl().getMenu();
+		menu.notifyListeners(SWT.Show, new Event());
+		List<String> labels = new ArrayList<>();
+		for (MenuItem item : menu.getItems()) {
+			labels.add(item.getText().replace("&", ""));
+		}
+		assertTrue(labels.contains("Open With") && labels.contains("Show In"), labels.toString());
+		assertTrue(labels.contains("Copy Path"), labels.toString());
+		assertFalse(labels.contains("Run As") || labels.contains("Replace With"), labels.toString());
 	}
 
 	@Test

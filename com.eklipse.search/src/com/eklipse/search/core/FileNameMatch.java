@@ -4,11 +4,13 @@ import java.util.Arrays;
 import java.util.Comparator;
 
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.runtime.Adapters;
+import org.eclipse.core.runtime.IAdaptable;
 
 /**
  * A file found by its name. It's listed apart from the matches in the content of the files, a file can be both.
  */
-public final class FileNameMatch {
+public final class FileNameMatch implements IAdaptable {
 
 	/**
 	 * The most relevant first: a file referred to by its path or class, the whole name or the name without its
@@ -68,6 +70,15 @@ public final class FileNameMatch {
 
 	public IFile getFile() {
 		return file;
+	}
+
+	/**
+	 * Adapts to what the file adapts to, so the contributions of Eclipse to the context menu of a file (Open With,
+	 * Compare With, Team, Show In...) work on a result like on the file in the Project Explorer.
+	 */
+	@Override
+	public <T> T getAdapter(Class<T> adapter) {
+		return Adapters.adapt(file, adapter);
 	}
 
 	/**

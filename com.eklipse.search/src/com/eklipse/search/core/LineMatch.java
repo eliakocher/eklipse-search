@@ -1,13 +1,15 @@
 package com.eklipse.search.core;
 
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.runtime.Adapters;
+import org.eclipse.core.runtime.IAdaptable;
 
 /**
  * A single match together with a one line preview of its surroundings.
  * <p>
  * Instances are immutable and compared by identity, which is what the result tree needs.
  */
-public final class LineMatch {
+public final class LineMatch implements IAdaptable {
 
 	private final IFile file;
 	private final int offset;
@@ -42,6 +44,15 @@ public final class LineMatch {
 
 	public IFile getFile() {
 		return file;
+	}
+
+	/**
+	 * Adapts to what the file adapts to, so the contributions of Eclipse to the context menu of a file (Open With,
+	 * Compare With, Team, Show In...) work on a result like on the file in the Project Explorer.
+	 */
+	@Override
+	public <T> T getAdapter(Class<T> adapter) {
+		return Adapters.adapt(file, adapter);
 	}
 
 	public int getOffset() {
