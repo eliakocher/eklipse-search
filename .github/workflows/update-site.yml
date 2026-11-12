@@ -1,8 +1,13 @@
 # Builds the p2 update site and publishes it on GitHub Pages: https://eliakocher.github.io/eklipse-search/
 # Runs for a version tag matching the project version, e.g. 1.0.3 for 1.0.3-SNAPSHOT:
 #   git tag 1.0.3 && git push origin 1.0.3
-# Each run replaces the site with the build of that tag. Tags may deploy to Pages thanks to the tag rule *.*.* under
-# Settings > Environments > github-pages (only main may by default).
+# Every version lives in its own folder on the gh-pages branch (.../eklipse-search/1.0.3/) that never changes once
+# published, so it can be pinned. The root is a composite repository of all versions, rebuilt on every run.
+# To publish an already existing tag (e.g. to bring back an old version), run this workflow manually from main:
+# Actions > Update site > Run workflow, tag = 1.0.3. Backfill oldest first, the landing page follows the newest version.
+# Version qualifiers are build timestamps. The optional qualifier input forces one (e.g. 202611110855) to rebuild a
+# version with the exact version string it was first published with.
+# Settings > Pages > Source must be "Deploy from a branch", gh-pages, / (root).
 # The plugin and the feature are PGP-signed with the key in the repository secrets MAVEN_GPG_KEY (armored secret key,
 # gpg --armor --export-secret-keys <fingerprint>) and MAVEN_GPG_PASSPHRASE. Keep using the same key: Eclipse remembers
 # the trusted signer, a new key makes everyone confirm again. Its fingerprint is in README.md and
@@ -12,27 +17,51 @@ name: Update site
 on:
   push:
     tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish, e.g. 1.2.0
+        required: true
+      qualifier:
+        description: Optional build qualifier to force, e.g. 202611110855 (default is the build timestamp)
+        required: false
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write # pushes to gh-pages
 
-# one deployment at a time, a newer one waits instead of cancelling a running one
+# one publication at a time, a newer one waits instead of cancelling a running one
 concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  QUALIFIER: ${{ inputs.qualifier }}
+  SITE: com.eklipse.search.site
+  NAME: Eklipse Search
+
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Check the tag format
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$TAG' is not a version tag like 1.2.0"
+            exit 1
+          fi
+          if [ -n "$QUALIFIER" ] && ! printf '%s' "$QUALIFIER" | grep -Eq '^[0-9A-Za-z_-]+$'; then
+            echo "::error::'$QUALIFIER' is not a valid qualifier"
+            exit 1
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - name: Check that the tag matches the version
         run: |
           version=$(grep -m1 '<version>' pom.xml | sed 's:.*<version>\(.*\)</version>.*:\1:')
-          if [ "${version%-SNAPSHOT}" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match the project version $version"
+          if [ "${version%-SNAPSHOT}" != "$TAG" ]; then
+            echo "::error::Tag $TAG doesn't match the project version $version"
             exit 1
           fi
       - uses: actions/setup-java@v4
@@ -53,19 +82,44 @@ jobs:
       - name: Build, test and sign
         env:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
-        run: ./mvnw -B verify -Psign -Dtycho.pgp.signer.bc.secretKeys="$RUNNER_TEMP/signing-key.asc"
-      - name: Add the landing page
-        run: cp com.eklipse.search.site/index.html com.eklipse.search.site/target/repository/
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: com.eklipse.search.site/target/repository
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+        run: |
+          args=(-Psign "-Dtycho.pgp.signer.bc.secretKeys=$RUNNER_TEMP/signing-key.asc")
+          if [ -n "$QUALIFIER" ]; then
+            args+=("-DforceContextQualifier=$QUALIFIER")
+          fi
+          ./mvnw -B verify "${args[@]}"
+      - name: Publish into its own folder on gh-pages
+        run: |
+          root=$PWD
+          git fetch --depth 1 origin gh-pages:gh-pages
+          git worktree add pages gh-pages
+          if [ -e "pages/$TAG" ]; then
+            echo "::error::$TAG is already published, published versions never change"
+            exit 1
+          fi
+          cp -r "$SITE/target/repository" "pages/$TAG"
+          cd pages
+          versions=$(ls -d [0-9]*.[0-9]*.[0-9]* | sort -V)
+          # the landing page follows the newest version, publishing an older one later must not replace it
+          if [ "$TAG" = "$(echo "$versions" | tail -n 1)" ]; then
+            cp "$root/$SITE/index.html" index.html
+          fi
+          composite() {
+            {
+              echo "<?xml version='1.0' encoding='UTF-8'?>"
+              echo "<?$2 version='1.0.0'?>"
+              echo "<repository name='$NAME' type='$3' version='1.0.0'>"
+              echo "  <properties size='1'><property name='p2.atomic.composite.loading' value='true'/></properties>"
+              echo "  <children size='$(echo "$versions" | wc -l)'>"
+              for v in $versions; do echo "    <child location='$v'/>"; done
+              echo "  </children>"
+              echo "</repository>"
+            } > "$1"
+          }
+          composite compositeContent.xml compositeMetadataRepository org.eclipse.equinox.internal.p2.metadata.repository.CompositeMetadataRepository
+          composite compositeArtifacts.xml compositeArtifactRepository org.eclipse.equinox.internal.p2.artifact.repository.CompositeArtifactRepository
+          printf 'version=1\nmetadata.repository.factory.order=compositeContent.xml,\\!\nartifact.repository.factory.order=compositeArtifacts.xml,\\!\n' > p2.index
+          touch .nojekyll
+          git add -A
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Publish $TAG"
+          git push origin gh-pages
