@@ -64,12 +64,15 @@ public final class FileNameSearch {
 	 * up even if it's excluded: the search text with an extension, like {@code Foo.js}, finds the file with that name
 	 * whatever the globs say; without one, like {@code Foo}, it finds the files with that name with or without an
 	 * extension, and the include globs still apply, so {@code *.java} finds {@code Foo.java} but not {@code Foo.js}.
-	 * Regular expressions and texts with wildcards find nothing, they have no exact name.
+	 * The same goes for a file referred to by its path, like {@code web/Foo.js}, see {@link FileReference}: a name with
+	 * an extension is found whatever the globs say, the closest folders winning, a qualified class name like
+	 * {@code com.acme.Foo} needs the include globs to accept the file. Regular expressions and texts with wildcards find
+	 * nothing, they have no exact name.
 	 *
 	 * @param files the files the globs of {@code scope} leave out, see {@link WorkspaceSearchScope.Files}
 	 * @param query the query
 	 * @param scope the scope of {@code query}, for its include globs
-	 * @param names receives the files found
+	 * @param names receives the files found, as {@linkplain FileNameMatch#isExcluded() excluded} matches
 	 * @param monitor the monitor used for cancellation, stops the search when canceled
 	 */
 	public static void searchExactNames(IFile[] files, SearchQuery query, WorkspaceSearchScope scope,
@@ -82,6 +85,8 @@ public final class FileNameSearch {
 		int length = text.length();
 		// not a name starting with a dot like .gitignore
 		boolean withExtension = text.lastIndexOf('.') > 0;
+		FileReference reference = query.fileReference();
+		List<IFile> referenced = new ArrayList<>();
 		for (IFile file : files) {
 			if (monitor.isCanceled()) {
 				return;
@@ -92,7 +97,15 @@ public final class FileNameSearch {
 			boolean withoutExtension = name.length() > length && name.lastIndexOf('.') == length;
 			if ((whole || withoutExtension) && name.regionMatches(ignoreCase, 0, text, 0, length)
 					&& (whole && withExtension || scope.isIncluded(file))) {
-				names.accept(new FileNameMatch(file, 0, length));
+				names.accept(new FileNameMatch(file, 0, length).asExcluded());
+			} else if (reference != null && reference.matchesName(name, query.caseSensitive())
+					&& (!reference.isClass() || scope.isIncluded(file))) {
+				referenced.add(file);
+			}
+		}
+		if (reference != null) {
+			for (IFile file : closest(referenced, reference.folders(), query.caseSensitive())) {
+				names.accept(FileNameMatch.referenced(file, reference.line()).asExcluded());
 			}
 		}
 	}

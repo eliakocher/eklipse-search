@@ -26,6 +26,25 @@ class SearchResultTest {
 				.sorted(FileNameMatch.BY_RELEVANCE).map(m -> m.getFile().getName()).toList());
 	}
 
+	@Test
+	void excludedNameMatchesAreKeptApart() {
+		SearchResult result = new SearchResult();
+		result.addNameMatch(name("Util.java", 0, 4), 1);
+		// the limit is per kind: a name match doesn't push out an excluded one, nor the other way round
+		FileNameMatch excluded = name("Util.js", 0, 4).asExcluded();
+		assertEquals(excluded, result.addNameMatch(excluded, 1).added());
+
+		assertEquals(1, result.getNameMatchCount());
+		assertEquals(1, result.getExcludedCount());
+		assertEquals(excluded, result.getNameMatch(excluded.getFile()));
+		assertEquals(excluded, result.removeNameMatch(excluded.getFile()));
+		assertEquals(0, result.getExcludedCount());
+
+		SearchResult onlyExcluded = new SearchResult();
+		onlyExcluded.addNameMatch(excluded, 1);
+		assertEquals(false, onlyExcluded.isEmpty(), "the excluded files are results too");
+	}
+
 	private static FileNameMatch name(String fileName, int start, int end) {
 		return new FileNameMatch(ResourcesPlugin.getWorkspace().getRoot().getFile(new Path("/project/src/" + fileName)),
 				start, end);

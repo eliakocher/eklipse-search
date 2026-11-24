@@ -31,6 +31,7 @@ public final class FileNameMatch implements IAdaptable {
 	private final int[] highlights;
 	private final int rank;
 	private final int line;
+	private final boolean excluded;
 
 	/**
 	 * A match of the search text in the name.
@@ -40,14 +41,15 @@ public final class FileNameMatch implements IAdaptable {
 	 * @param end the end of the match in the file name
 	 */
 	public FileNameMatch(IFile file, int start, int end) {
-		this(file, new int[] { start, end }, rank(file.getName(), start, end), 0);
+		this(file, new int[] { start, end }, rank(file.getName(), start, end), 0, false);
 	}
 
-	private FileNameMatch(IFile file, int[] highlights, int rank, int line) {
+	private FileNameMatch(IFile file, int[] highlights, int rank, int line, boolean excluded) {
 		this.file = file;
 		this.highlights = highlights;
 		this.rank = rank;
 		this.line = line;
+		this.excluded = excluded;
 	}
 
 	/**
@@ -56,7 +58,7 @@ public final class FileNameMatch implements IAdaptable {
 	 * @return a match of a camel case abbreviation, like {@code NPE} for {@code NullPointerException.java}
 	 */
 	public static FileNameMatch camelCase(IFile file, int[] highlights) {
-		return new FileNameMatch(file, highlights, CAMEL_CASE, 0);
+		return new FileNameMatch(file, highlights, CAMEL_CASE, 0, false);
 	}
 
 	/**
@@ -65,7 +67,21 @@ public final class FileNameMatch implements IAdaptable {
 	 * @return a file referred to by its path or class, see {@link FileReference}
 	 */
 	public static FileNameMatch referenced(IFile file, int line) {
-		return new FileNameMatch(file, new int[] { 0, file.getName().length() }, WHOLE_NAME, line);
+		return new FileNameMatch(file, new int[] { 0, file.getName().length() }, WHOLE_NAME, line, false);
+	}
+
+	/**
+	 * @return the same match, for a file the include/exclude globs leave out, see {@link #isExcluded()}
+	 */
+	public FileNameMatch asExcluded() {
+		return new FileNameMatch(file, highlights, rank, line, true);
+	}
+
+	/**
+	 * @return {@code true} if the file is left out by the include/exclude globs and only found by its name
+	 */
+	public boolean isExcluded() {
+		return excluded;
 	}
 
 	public IFile getFile() {

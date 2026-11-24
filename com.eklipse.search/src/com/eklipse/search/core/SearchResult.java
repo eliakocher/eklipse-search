@@ -17,6 +17,7 @@ public final class SearchResult {
 
 	private final Map<IFile, FileMatch> files = new LinkedHashMap<>();
 	private final Map<IFile, FileNameMatch> names = new LinkedHashMap<>();
+	private final Map<IFile, FileNameMatch> excluded = new LinkedHashMap<>();
 	private int matchCount;
 
 	/**
@@ -56,22 +57,38 @@ public final class SearchResult {
 	}
 
 	/**
-	 * @param file the file
-	 * @return the match of the file's name, {@code null} if the file wasn't found by its name
+	 * @return the files found by their name that the include/exclude globs leave out, in no particular order
 	 */
-	public FileNameMatch getNameMatch(IFile file) {
-		return names.get(file);
+	public Collection<FileNameMatch> getExcludedMatches() {
+		return Collections.unmodifiableCollection(excluded.values());
 	}
 
+	/**
+	 * @param file the file
+	 * @return the match of the file's name, also if the file is excluded, {@code null} if the file wasn't found by its
+	 *         name
+	 */
+	public FileNameMatch getNameMatch(IFile file) {
+		FileNameMatch match = names.get(file);
+		return match != null ? match : excluded.get(file);
+	}
+
+	/**
+	 * @return the number of files found by their name, not counting the excluded ones
+	 */
 	public int getNameMatchCount() {
 		return names.size();
+	}
+
+	public int getExcludedCount() {
+		return excluded.size();
 	}
 
 	/**
 	 * @return {@code true} if neither the content nor the name of any file matched
 	 */
 	public boolean isEmpty() {
-		return files.isEmpty() && names.isEmpty();
+		return files.isEmpty() && names.isEmpty() && excluded.isEmpty();
 	}
 
 	/**
@@ -90,25 +107,26 @@ public final class SearchResult {
 	/**
 	 * Adds a file found by its name. Only the {@code max} most relevant ones are kept, see
 	 * {@link FileNameMatch#BY_RELEVANCE}, so a short search text doesn't bury the matches in the content under file
-	 * names.
+	 * names. The excluded ones, see {@link FileNameMatch#isExcluded()}, are kept apart, with the same limit.
 	 *
 	 * @param match the file found by its name
-	 * @param max the number of name matches to keep at most
+	 * @param max the number of name matches to keep at most, of each kind
 	 * @return what changed
 	 */
 	public NameMatchChange addNameMatch(FileNameMatch match, int max) {
-		if (names.containsKey(match.getFile())) {
+		Map<IFile, FileNameMatch> matches = match.isExcluded() ? excluded : names;
+		if (matches.containsKey(match.getFile())) {
 			return new NameMatchChange(null, null);
 		}
 		FileNameMatch dropped = null;
-		if (names.size() >= max) {
-			FileNameMatch least = Collections.max(names.values(), FileNameMatch.BY_RELEVANCE);
+		if (matches.size() >= max) {
+			FileNameMatch least = Collections.max(matches.values(), FileNameMatch.BY_RELEVANCE);
 			if (FileNameMatch.BY_RELEVANCE.compare(match, least) >= 0) {
 				return new NameMatchChange(null, null);
 			}
-			dropped = names.remove(least.getFile());
+			dropped = matches.remove(least.getFile());
 		}
-		names.put(match.getFile(), match);
+		matches.put(match.getFile(), match);
 		return new NameMatchChange(match, dropped);
 	}
 
@@ -150,7 +168,8 @@ public final class SearchResult {
 	 * @return the removed name match, {@code null} if the file wasn't found by its name
 	 */
 	public FileNameMatch removeNameMatch(IFile file) {
-		return names.remove(file);
+		FileNameMatch removed = names.remove(file);
+		return removed != null ? removed : excluded.remove(file);
 	}
 
 	/**

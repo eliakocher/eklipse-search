@@ -124,6 +124,11 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			text.append(PATH_SEPARATOR + folder(file), StyledString.QUALIFIER_STYLER);
 			return text;
 		}
+		if (element instanceof ExcludedFiles excluded) {
+			StyledString text = new StyledString(ExcludedFiles.LABEL);
+			text.append(" " + excluded.count(), StyledString.COUNTER_STYLER);
+			return text;
+		}
 		if (element instanceof LineMatch match) {
 			String preview = match.getPreview();
 			int start = match.getPreviewMatchStart();
@@ -156,6 +161,9 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		}
 		if (element instanceof FileNameMatch nameMatch) {
 			return nameMatch.getFile().getFullPath().makeRelative().toString();
+		}
+		if (element instanceof ExcludedFiles) {
+			return "Files with this name that the include and exclude filters leave out";
 		}
 		return null;
 	}
@@ -192,6 +200,9 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 			paintFile(event, fileMatch.getFile(), " " + fileMatch.getMatchCount(), new int[0]);
 		} else if (element instanceof FileNameMatch nameMatch) {
 			paintFile(event, nameMatch.getFile(), lineSuffix(nameMatch), nameMatch.getHighlights());
+		} else if (element instanceof ExcludedFiles) {
+			drawLineAbove(event);
+			super.paint(event, element);
 		} else {
 			super.paint(event, element);
 		}
@@ -252,6 +263,21 @@ final class ResultLabelProvider extends StyledCellLabelProvider {
 		TreeItem item = (TreeItem) event.item;
 		Tree tree = item.getParent();
 		if (names > 0 && names < tree.getItemCount() && tree.getItem(names) == item) {
+			GC gc = event.gc;
+			Color foreground = gc.getForeground();
+			gc.setForeground(mix(tree, SEPARATOR));
+			gc.drawLine(0, event.y, tree.getClientArea().width, event.y);
+			gc.setForeground(foreground);
+		}
+	}
+
+	/**
+	 * A line above a row that isn't the first one.
+	 */
+	private void drawLineAbove(Event event) {
+		TreeItem item = (TreeItem) event.item;
+		Tree tree = item.getParent();
+		if (tree.indexOf(item) > 0) {
 			GC gc = event.gc;
 			Color foreground = gc.getForeground();
 			gc.setForeground(mix(tree, SEPARATOR));

@@ -62,6 +62,7 @@ import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.MenuItem;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.swt.widgets.ToolItem;
+import org.eclipse.swt.widgets.Tree;
 import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IWorkbenchPage;
@@ -584,6 +585,32 @@ class SearchViewUiTest {
 		processEvents();
 		assertEquals(sender, page.getActiveEditor().getEditorInput().getAdapter(IFile.class));
 		assertEquals(2, editorSelection().getStartLine());
+	}
+
+	@Test
+	void filesTheFiltersLeaveOutAreListedLast() throws Exception {
+		IFile vendor = createFile("web/node_modules/vendor.js", "var x;\n");
+		createFile("src/com/example/Loader.java", "class Loader { String s = \"vendor.js\"; }\n");
+		view.getIncludeField().setText("*.java");
+		view.getExcludeField().setText("**/node_modules");
+		view.activateSearch("vendor.js");
+		waitForSearch();
+
+		assertEquals("1 result in 1 file, 1 excluded file", view.getSummary());
+		Tree tree = view.getViewer().getTree();
+		TreeItem row = tree.getItem(tree.getItemCount() - 1);
+		assertTrue(row.getData() instanceof ExcludedFiles, "the last row groups the excluded files");
+		assertTrue(row.getExpanded());
+		assertEquals(vendor, ((FileNameMatch) row.getItem(0).getData()).getFile());
+		assertTrue(view.getViewer().getStructuredSelection().getFirstElement() instanceof LineMatch,
+				"the first result is the match in the content, not the row of the excluded files");
+
+		// only an excluded file: it's the first result, Enter opens it
+		view.getIncludeField().setText("*.md");
+		view.activateSearch("web/node_modules/vendor.js");
+		waitForSearch();
+		assertEquals("1 excluded file", view.getSummary());
+		assertEquals(vendor, ((FileNameMatch) view.getViewer().getStructuredSelection().getFirstElement()).getFile());
 	}
 
 	/**

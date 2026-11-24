@@ -9,13 +9,13 @@ import com.eklipse.search.core.LineMatch;
 
 /**
  * Sorts the files found by their name first, most relevant on top, then the other files by path, and matches by
- * position. The search runs in parallel, so without sorting the order would change from one search to the next.
+ * position. The row of the excluded files is the last one. The search runs in parallel, so without sorting the order would change from one search to the next.
  */
 final class ResultComparator extends ViewerComparator {
 
 	@Override
 	public int category(Object element) {
-		return element instanceof FileNameMatch ? 0 : 1;
+		return element instanceof FileNameMatch ? 0 : element instanceof ExcludedFiles ? 2 : 1;
 	}
 
 	@Override

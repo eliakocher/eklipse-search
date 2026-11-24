@@ -240,6 +240,7 @@ public class SearchView extends ViewPart {
 	private Label durationLabel;
 	private SashForm resultSash;
 	private ResultViewer viewer;
+	private ResultContentProvider contentProvider;
 	private PreviewPane preview;
 	private EmptyState emptyState;
 	private EditorMatchMarks editorMarks;
@@ -578,7 +579,8 @@ public class SearchView extends ViewPart {
 		viewer = new ResultViewer(resultSash, SWT.MULTI | SWT.V_SCROLL | SWT.FULL_SELECTION);
 		Tree tree = viewer.getTree();
 		viewer.setUseHashlookup(true);
-		viewer.setContentProvider(new ResultContentProvider());
+		contentProvider = new ResultContentProvider();
+		viewer.setContentProvider(contentProvider);
 		// a single column kept as wide as the view; without it the tree grows to the longest line and scrolls sideways
 		TreeViewerColumn column = new TreeViewerColumn(viewer, SWT.NONE);
 		Font pathFont = resources.create(FontDescriptor.createFrom(tree.getFont()).increaseHeight(-2));
@@ -1642,18 +1644,43 @@ public class SearchView extends ViewPart {
 	 */
 	private void addNameMatches(SearchSession s) {
 		List<FileNameMatch> added = new ArrayList<>();
+		List<FileNameMatch> addedExcluded = new ArrayList<>();
 		FileNameMatch name;
 		while ((name = s.incomingNames.poll()) != null) {
 			SearchResult.NameMatchChange change = result.addNameMatch(name, MAX_NAME_MATCHES);
 			if (change.added() != null) {
-				added.add(change.added());
+				(change.added().isExcluded() ? addedExcluded : added).add(change.added());
 			}
-			if (change.dropped() != null && !added.remove(change.dropped())) {
+			if (change.dropped() != null && !added.remove(change.dropped()) && !addedExcluded.remove(change.dropped())) {
 				viewer.remove(change.dropped());
 			}
 		}
 		if (!added.isEmpty()) {
 			viewer.add(result, added.toArray());
+		}
+		ExcludedFiles excludedFiles = contentProvider.excludedFiles();
+		if (excludedFiles != null && excludedFiles.count() > 0 && viewer.testFindItem(excludedFiles) == null) {
+			// the row is the last one and open, the files looked for are there to be seen
+			viewer.add(result, excludedFiles);
+			viewer.setExpandedState(excludedFiles, true);
+		} else if (!addedExcluded.isEmpty()) {
+			viewer.add(excludedFiles, addedExcluded.toArray());
+			viewer.update(excludedFiles, null);
+		}
+	}
+
+	/**
+	 * Removes the row of the excluded files once none is left, shows their number otherwise.
+	 */
+	private void updateExcludedRow() {
+		ExcludedFiles excludedFiles = contentProvider.excludedFiles();
+		if (excludedFiles == null || viewer.testFindItem(excludedFiles) == null) {
+			return;
+		}
+		if (excludedFiles.count() == 0) {
+			viewer.remove(excludedFiles);
+		} else {
+			viewer.update(excludedFiles, null);
 		}
 	}
 
@@ -1667,7 +1694,8 @@ public class SearchView extends ViewPart {
 			setSummary("Searching…", false);
 			return;
 		}
-		String counts = formatCounts(result.getNameMatchCount(), result.getMatchCount(), result.getFileCount());
+		String counts = formatCounts(result.getNameMatchCount(), result.getMatchCount(), result.getFileCount(),
+				result.getExcludedCount());
 		if (!s.done) {
 			setSummary(result.isEmpty() ? "Searching…" : "Searching… " + counts, false);
 			return;
@@ -1698,14 +1726,19 @@ public class SearchView extends ViewPart {
 		return text.toString().trim();
 	}
 
-	private static String formatCounts(int names, int matches, int files) {
-		String content = matches + (matches == 1 ? " result in " : " results in ") + files
-				+ (files == 1 ? " file" : " files");
-		if (names == 0) {
-			return content;
+	private static String formatCounts(int names, int matches, int files, int excluded) {
+		List<String> counts = new ArrayList<>();
+		if (names > 0) {
+			counts.add(names + (names == 1 ? " file name" : " file names"));
 		}
-		String found = names + (names == 1 ? " file name" : " file names");
-		return matches == 0 ? found : found + ", " + content;
+		if (matches > 0 || names == 0 && excluded == 0) {
+			counts.add(matches + (matches == 1 ? " result in " : " results in ") + files
+					+ (files == 1 ? " file" : " files"));
+		}
+		if (excluded > 0) {
+			counts.add(excluded + (excluded == 1 ? " excluded file" : " excluded files"));
+		}
+		return String.join(", ", counts);
 	}
 
 	private void setSummary(String text, boolean error) {
@@ -1966,6 +1999,7 @@ public class SearchView extends ViewPart {
 		tree.setRedraw(false);
 		try {
 			viewer.remove(removed.toArray());
+			updateExcludedRow();
 			if (!added.isEmpty()) {
 				viewer.add(result, added.toArray());
 			}
@@ -2128,10 +2162,12 @@ public class SearchView extends ViewPart {
 	}
 
 	/**
-	 * @return whether Enter opens the row, the row of a file is skipped while its matches are shown below it
+	 * @return whether Enter opens the row, the row of a file is skipped while its matches are shown below it, and that
+	 *         of the excluded files always
 	 */
 	private static boolean isResult(TreeItem item) {
-		return item.getData() != null && !(item.getData() instanceof FileMatch && item.getExpanded());
+		return item.getData() != null && !(item.getData() instanceof ExcludedFiles)
+				&& !(item.getData() instanceof FileMatch && item.getExpanded());
 	}
 
 	private static TreeItem nextVisible(TreeItem item) {
@@ -2263,6 +2299,7 @@ public class SearchView extends ViewPart {
 		tree.setRedraw(false);
 		try {
 			viewer.remove(removed.toArray());
+			updateExcludedRow();
 			// the match counts, a file removed after all its matches were is ignored
 			viewer.update(shrunk.toArray(), null);
 		} finally {

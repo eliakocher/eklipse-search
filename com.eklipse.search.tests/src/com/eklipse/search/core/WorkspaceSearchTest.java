@@ -173,6 +173,20 @@ class WorkspaceSearchTest {
 				"once, under the nested project");
 	}
 
+	@Test
+	void referencesFindFilesTheGlobsLeaveOut() throws CoreException {
+		createFile("web/node_modules/Foo.js", "");
+		createFile("web/node_modules/Foo.java", "");
+
+		assertEquals(List.of("search-test/web/node_modules/Foo.js"), exactNames("web/Foo.js", "*.java"),
+				"a path with an extension whatever the globs say");
+		assertEquals(List.of("search-test/web/node_modules/Foo.js"), exactNames("web/node_modules/Foo.js:3", "*.java"),
+				"with a line");
+		assertEquals(List.of(), exactNames("web/Bar.js", "*.java"), "only that name");
+		assertEquals(List.of("search-test/web/node_modules/Foo.java"), exactNames("web.Foo", "*.java"),
+				"a class only if the include accepts it");
+	}
+
 	/**
 	 * @return the files the globs leave out found by their exact name, with includes and node_modules excluded, sorted
 	 */
